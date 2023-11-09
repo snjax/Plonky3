@@ -32,4 +32,5 @@ members = [
     "tensor-pcs",
     "util",
     "uni-stark",
+    "uni-plonk"
 ]

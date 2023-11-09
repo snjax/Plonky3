@@ -135,7 +135,7 @@ where
         .into_par_iter()
         .step_by(SC::PackedVal::WIDTH)
         .flat_map_iter(|i_local_start| {
-            let wrap = |i| i % quotient_size;
+            let wrap = |i| -> usize {i % quotient_size};
             let i_next_start = wrap(i_local_start + next_step);
             let i_range = i_local_start..i_local_start + SC::PackedVal::WIDTH;
 
