@@ -1,8 +1,11 @@
 use crate::{Engine};
-use p3_field::{AbstractExtensionField, AbstractField, ExtensionField, Field};
+use p3_field::{AbstractExtensionField, AbstractField, ExtensionField, TwoAdicField};
 use p3_matrix::{MatrixRowSlices};
 use core::marker::PhantomData;
 use p3_air::TwoRowMatrixView;
+use p3_matrix::dense::RowMajorMatrix;
+use p3_util::log2_ceil_usize;
+use alloc::vec;
 
 fn repr_as<T,S>(src:&[T]) -> &S {
     let (prefix, shorts, suffix) = unsafe { src.align_to::<S>() };
@@ -11,6 +14,7 @@ fn repr_as<T,S>(src:&[T]) -> &S {
     debug_assert_eq!(shorts.len(), 1);
     &shorts[0]
 }
+
 
 
 fn repr_as_mut<T,S>(src:&mut [T]) -> &mut S {
@@ -85,7 +89,7 @@ struct Multiset<T> {
 pub struct Plonk<T>(PhantomData<T>);
 
 impl <F, EF> Engine for Plonk<(F, EF)> where
-    F:Field,
+    F:TwoAdicField,
     EF:ExtensionField<F>,
 {
     type F = F;
@@ -96,7 +100,6 @@ impl <F, EF> Engine for Plonk<(F, EF)> where
     const ID_WIDTH:usize=3;
 
     fn eval_gates<BaseF, ExtF>(multiplier: &[ExtF],
-                               _:TwoRowMatrixView<BaseF>,
                                fixed: TwoRowMatrixView<BaseF>,
                                advice: TwoRowMatrixView<BaseF>,
                                multiset_f: TwoRowMatrixView<ExtF>,
@@ -200,5 +203,32 @@ impl <F, EF> Engine for Plonk<(F, EF)> where
             lookup_left,
             lookup_right
         };
+    }
+
+    fn id_matrix(log_degree: usize) -> RowMajorMatrix<Self::F> {
+        // Field should be big enough to represent all indices as a single field element. Otherwise we need two field elements per one index.
+        const X_WIDTH:usize = core::mem::size_of::<X<u64>>()/core::mem::size_of::<u64>();
+        let degree = 1 << log_degree;
+        assert!(log2_ceil_usize(X_WIDTH) + log_degree < F::TWO_ADICITY);
+
+        let g = F::two_adic_generator(log_degree);
+        let h = F::generator();
+
+        let h2 = h*h;
+
+        let mut buff = vec![F::zero(); degree*X_WIDTH];
+
+        let mut x = F::one();
+
+        for i in 0..degree {
+            *repr_as_mut(&mut buff[i*X_WIDTH..(i+1)*X_WIDTH]) = X {
+                a: x,
+                b: x*h,
+                c: x*h2
+            };
+            x*=g;
+        }
+
+        RowMajorMatrix::new(buff, X_WIDTH)
     }
 }
