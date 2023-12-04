@@ -21,18 +21,13 @@ use crate::engine::Engine;
 
 
 
-pub fn get_permutation_matrixes<C, E>(
-    config:&C,
-    engine:&E,
-    fixed: RowMajorMatrixView<C::Val>,
-    advice: RowMajorMatrixView<C::Val>,
-) where
-    C: Config,
-    E: Engine<F=C::Val, EF=C::Challenge>
-{
-    todo!()
+pub fn to_values_matrix<C:Config>(m:&RowMajorMatrix<C::Challenge>) -> RowMajorMatrix<C::Val> {
+    let mut values = Vec::with_capacity(m.values.len() * C::Challenge::D);
+    for c in m.values.as_slice() {
+        values.extend(c.as_base_slice());
+    }
+    RowMajorMatrix::new(values, m.width() * C::Challenge::D)
 }
-
 
 #[instrument(skip_all)]
 pub fn prove<C, E>(
@@ -112,7 +107,8 @@ pub fn prove<C, E>(
         multiset_s
     };
 
-    // Compute vertical additions suffix table for multiset_a_inverse, substracting multiset_s from each row
+    // Compute partial sum multiset trace
+    // vertical additions suffix table for multiset_a_inverse, subtracting multiset_s from each row
 
     let multiset_f = {
         let mut multiset_f = RowMajorMatrix::new(vec![C::Challenge::zero(); E::MULTISET_WIDTH*degree], E::MULTISET_WIDTH);
@@ -127,18 +123,19 @@ pub fn prove<C, E>(
         multiset_f
     };
 
-
-
-
-
+    // unroll extension field elements
+    let multiset_f_values = to_values_matrix::<C>(&multiset_f);
 
     // Compute commitment to partial sum multiset trace
+    let (multiset_commit, multiset_data) =
+        info_span!("commit to multiset trace data").in_scope(|| pcs.commit_batch(multiset_f_values.as_view()));
 
     // Observe commitment to partial sum multiset trace
 
-    // Compute multiset sum values
+    challenger.observe(multiset_commit.clone());
 
     // Observe multiset sum values
+    challenger.observe_slice(to_values_matrix::<C>(&multiset_s).values.as_slice());
 
     // Get PLONK alpha random linear combination challenge
     let alpha = challenger.sample_ext_element::<C::Challenge>();
