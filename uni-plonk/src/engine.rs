@@ -26,5 +26,8 @@ pub trait Engine {
     
     
     fn id_matrix(log_degree:usize) -> RowMajorMatrix<Self::F>;
+
+    fn id_matrix_at<BaseF>(x_local:BaseF, x_next:BaseF) -> RowMajorMatrix<BaseF>
+        where BaseF: AbstractField<F=Self::F> + Copy;
 }
 

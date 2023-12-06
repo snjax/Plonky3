@@ -11,7 +11,7 @@ pub trait Config {
     type PackedVal: PackedField<Scalar = Self::Val>;
     /// The field from which most random challenges are drawn.
     type Challenge: ExtensionField<Self::Val> + TwoAdicField;
-    type PackedChallenge: AbstractExtensionField<Self::PackedVal, F = Self::Challenge>;
+    type PackedChallenge: AbstractExtensionField<Self::PackedVal, F = Self::Challenge> + Sync + Copy;
 
     /// The PCS used to commit to trace polynomials.
     type Pcs: for<'a> UnivariatePcsWithLde<

@@ -7,6 +7,7 @@ use p3_matrix::dense::RowMajorMatrix;
 use p3_util::log2_ceil_usize;
 use alloc::vec;
 
+
 fn repr_as<T,S>(src:&[T]) -> &S {
     let (prefix, shorts, suffix) = unsafe { src.align_to::<S>() };
     debug_assert!(prefix.is_empty(), "Data was not aligned");
@@ -207,21 +208,20 @@ impl <F, EF> Engine for Plonk<(F, EF)> where
 
     fn id_matrix(log_degree: usize) -> RowMajorMatrix<Self::F> {
         // Field should be big enough to represent all indices as a single field element. Otherwise we need two field elements per one index.
-        const X_WIDTH:usize = core::mem::size_of::<X<u64>>()/core::mem::size_of::<u64>();
         let degree = 1 << log_degree;
-        assert!(log2_ceil_usize(X_WIDTH) + log_degree < F::TWO_ADICITY);
+        assert!(log2_ceil_usize(Self::ID_WIDTH) + log_degree < F::TWO_ADICITY);
 
         let g = F::two_adic_generator(log_degree);
         let h = F::generator();
 
         let h2 = h*h;
 
-        let mut buff = vec![F::zero(); degree*X_WIDTH];
+        let mut buff = vec![F::zero(); degree*Self::ID_WIDTH];
 
         let mut x = F::one();
 
         for i in 0..degree {
-            *repr_as_mut(&mut buff[i*X_WIDTH..(i+1)*X_WIDTH]) = X {
+            *repr_as_mut(&mut buff[i*Self::ID_WIDTH..(i+1)*Self::ID_WIDTH]) = X {
                 a: x,
                 b: x*h,
                 c: x*h2
@@ -229,6 +229,27 @@ impl <F, EF> Engine for Plonk<(F, EF)> where
             x*=g;
         }
 
-        RowMajorMatrix::new(buff, X_WIDTH)
+        RowMajorMatrix::new(buff, Self::ID_WIDTH)
+    }
+
+    fn id_matrix_at<BaseF>(x_local:BaseF, x_next:BaseF) -> RowMajorMatrix<BaseF>
+        where BaseF: AbstractField<F=Self::F> + Copy
+    {
+        let mut buff = vec![BaseF::zero(); 2*Self::ID_WIDTH];
+        let h = BaseF::generator();
+        let h2 = h*h;
+        *repr_as_mut(&mut buff[0..Self::ID_WIDTH]) = X {
+            a: x_local,
+            b: x_local*h,
+            c: x_local*h2
+        };
+
+        *repr_as_mut(&mut buff[Self::ID_WIDTH..2*Self::ID_WIDTH]) = X {
+            a: x_next,
+            b: x_next*h,
+            c: x_next*h2
+        };
+
+        RowMajorMatrix::new(buff, Self::ID_WIDTH)
     }
 }
