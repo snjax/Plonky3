@@ -2,7 +2,6 @@ use crate::{Engine};
 use p3_field::{AbstractExtensionField, AbstractField, ExtensionField, TwoAdicField};
 use p3_matrix::{MatrixRowSlices};
 use core::marker::PhantomData;
-use p3_air::TwoRowMatrixView;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_util::log2_ceil_usize;
 use alloc::vec;
@@ -99,14 +98,14 @@ impl <F, EF> Engine for Plonk<(F, EF)> where
     const MAX_MULTISET_ELEMENT_WIDTH:usize=4;
     const MULTISET_WIDTH:usize=7;
     const ID_WIDTH:usize=3;
+    const NUM_GATES:usize=9;
 
     fn eval_gates<BaseF, ExtF>(multiplier: &[ExtF],
-                               fixed: TwoRowMatrixView<BaseF>,
-                               advice: TwoRowMatrixView<BaseF>,
-                               multiset_f: TwoRowMatrixView<ExtF>,
-                               multiset_a: TwoRowMatrixView<ExtF>,
-                               multiset_s: TwoRowMatrixView<ExtF>,
-                               target:&mut ExtF)
+                               fixed: &impl MatrixRowSlices<BaseF>,
+                               advice: &impl MatrixRowSlices<BaseF>,
+                               multiset_f: &impl MatrixRowSlices<ExtF>,
+                               multiset_a: &impl MatrixRowSlices<ExtF>,
+                               multiset_s: &impl MatrixRowSlices<ExtF>) -> ExtF
     where BaseF: AbstractField<F=Self::F> + Copy,
           ExtF: AbstractExtensionField<BaseF, F=Self::EF> + Copy
     {
@@ -165,10 +164,14 @@ impl <F, EF> Engine for Plonk<(F, EF)> where
             rlc_mul::<Self,_,ExtF>(multiplier, 7, expr)
         };
 
-        *target = acc;
+        acc
     }
 
-    fn eval_multiset<BaseF, ExtF>(multiplier: &[ExtF], id:TwoRowMatrixView<BaseF>, fixed: TwoRowMatrixView<BaseF>, advice: TwoRowMatrixView<BaseF>, target:&mut [ExtF])
+    fn eval_multiset<BaseF, ExtF>(multiplier: &[ExtF],
+                                  id: &impl MatrixRowSlices<BaseF>,
+                                  fixed: &impl MatrixRowSlices<BaseF>,
+                                  advice: &impl MatrixRowSlices<BaseF>,
+                                  target:&mut [ExtF])
         where BaseF: AbstractField<F=Self::F> + Copy,
               ExtF: AbstractExtensionField<BaseF, F=Self::EF> + Copy
     {

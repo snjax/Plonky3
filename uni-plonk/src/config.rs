@@ -3,7 +3,7 @@ use core::marker::PhantomData;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{Pcs, UnivariatePcsWithLde};
 use p3_field::{AbstractExtensionField, ExtensionField, PackedField, TwoAdicField};
-use p3_matrix::dense::{RowMajorMatrixView};
+use p3_matrix::dense::{RowMajorMatrix};
 
 pub trait Config {
     /// The field over which trace data is encoded.
@@ -11,19 +11,19 @@ pub trait Config {
     type PackedVal: PackedField<Scalar = Self::Val>;
     /// The field from which most random challenges are drawn.
     type Challenge: ExtensionField<Self::Val> + TwoAdicField;
-    type PackedChallenge: AbstractExtensionField<Self::PackedVal, F = Self::Challenge> + Sync + Copy;
+    type PackedChallenge: AbstractExtensionField<Self::PackedVal, F = Self::Challenge> + Send + Sync + Copy;
 
     /// The PCS used to commit to trace polynomials.
-    type Pcs: for<'a> UnivariatePcsWithLde<
+    type Pcs: UnivariatePcsWithLde<
         Self::Val,
         Self::Challenge,
-        RowMajorMatrixView<'a, Self::Val>,
+        RowMajorMatrix<Self::Val>,
         Self::Challenger,
     >;
 
     /// The challenger (Fiat-Shamir) implementation used.
     type Challenger: FieldChallenger<Self::Val>
-    + for<'a> CanObserve<<Self::Pcs as Pcs<Self::Val, RowMajorMatrixView<'a, Self::Val>>>::Commitment>;
+    + CanObserve<<Self::Pcs as Pcs<Self::Val, RowMajorMatrix<Self::Val>>>::Commitment>;
 
     fn pcs(&self) -> &Self::Pcs;
 }
@@ -48,10 +48,10 @@ for ConfigImpl<Val, Challenge, PackedChallenge, Pcs, Challenger>
     where
         Val: TwoAdicField,
         Challenge: ExtensionField<Val> + TwoAdicField+Copy,
-        PackedChallenge: AbstractExtensionField<Val::Packing, F = Challenge> + 'static + Send + Sync+Copy,
-        Pcs: for<'a> UnivariatePcsWithLde<Val, Challenge, RowMajorMatrixView<'a, Val>, Challenger>,
+        PackedChallenge: AbstractExtensionField<Val::Packing, F = Challenge> + Send + Sync + Copy,
+        Pcs: UnivariatePcsWithLde<Val, Challenge, RowMajorMatrix<Val>, Challenger>,
         Challenger: FieldChallenger<Val>
-        + for <'a> CanObserve<<Pcs as p3_commit::Pcs<Val, RowMajorMatrixView<'a, Val>>>::Commitment>,
+        + CanObserve<<Pcs as p3_commit::Pcs<Val, RowMajorMatrix<Val>>>::Commitment>,
 {
     type Val = Val;
     type PackedVal = Val::Packing;

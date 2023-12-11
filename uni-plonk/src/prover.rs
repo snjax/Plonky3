@@ -1,20 +1,22 @@
 use alloc::{vec::Vec, vec};
 use itertools::Itertools;
 
-use p3_air::{Air, TwoRowMatrixView};
+use p3_air::{TwoRowMatrixView};
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{Pcs, UnivariatePcs, UnivariatePcsWithLde};
-use p3_field::{cyclic_subgroup_coset_known_order, AbstractField, Field, PackedField, TwoAdicField, ExtensionField, AbstractExtensionField, batch_multiplicative_inverse};
+use p3_field::{cyclic_subgroup_coset_known_order, AbstractField, Field, PackedField, TwoAdicField, AbstractExtensionField, batch_multiplicative_inverse};
 use p3_matrix::dense::{RowMajorMatrix, RowMajorMatrixView};
 use p3_matrix::{Matrix, MatrixGet, MatrixRowSlices};
-use p3_maybe_rayon::{IndexedParallelIterator, MaybeIntoParIter, ParallelIterator, MaybeParIterMut, MaybeParChunksMut};
+use p3_maybe_rayon::{IndexedParallelIterator, MaybeIntoParIter, ParallelIterator, MaybeParChunksMut};
 use p3_util::log2_strict_usize;
 use tracing::{info_span, instrument};
 use p3_uni_stark::ZerofierOnCoset;
 
+use crate::decompose::decompose_and_flatten;
 
 
 use crate::{Config};
+use crate::proof::{Proof, Commitments, OpenedValues};
 
 use crate::engine::Engine;
 
@@ -29,20 +31,15 @@ pub fn to_values_matrix<C:Config>(m:&RowMajorMatrix<C::Challenge>) -> RowMajorMa
     RowMajorMatrix::new(values, m.width() * C::Challenge::D)
 }
 
-pub fn as_two_row_view<'a, T>(m: &'a impl MatrixRowSlices<T>) -> TwoRowMatrixView<'a, T> {
-    TwoRowMatrixView::new(m.row_slice(0), m.row_slice(1))
-}
-
 
 #[instrument(skip_all)]
 pub fn prove<C, E>(
     config: &C,
-    engine: &E,
     challenger: &mut C::Challenger,
     fixed: RowMajorMatrix<C::Val>,
     advice: RowMajorMatrix<C::Val>,
     instance: RowMajorMatrix<C::Val>
-)
+) -> Proof<C>
     where
         C: Config,
         E: Engine<F=C::Val, EF=C::Challenge>,
@@ -51,11 +48,12 @@ pub fn prove<C, E>(
     let degree = fixed.height();
     let log_degree = log2_strict_usize(degree);
     let log_quotient_degree = E::LOG_QUOTIENT_DEGREE;
-    let log_quotent_size = log_degree + log_quotient_degree;
+    let log_quotient_size = log_degree + log_quotient_degree;
     let g_subgroup = C::Val::two_adic_generator(log_degree);
-    let g_extended = C::Val::two_adic_generator(log_quotent_size);
+    let g_extended = C::Val::two_adic_generator(log_quotient_size);
     let log_blowup = config.pcs().log_blowup();
-    let blowup = 1 << log_blowup;
+
+    let row_multiplier = 1 << (log_blowup - log_quotient_degree);
 
     assert!(log_blowup >= log_quotient_degree, "PCS blowup is too small for quotient degree");
 
@@ -64,15 +62,18 @@ pub fn prove<C, E>(
     let pcs = config.pcs();
 
     // Compute commitment to fixed trace
+    // TODO: optimize memory for matrix commitment
     let (fixed_commit, fixed_data) =
-        info_span!("commit to fixed trace data").in_scope(|| pcs.commit_batch(fixed.as_view()));
+        info_span!("commit to fixed trace data").in_scope(|| pcs.commit_batch(fixed.clone()));
+
+
 
     // Observe commitment to fixed trace
     challenger.observe(fixed_commit.clone());
 
     // Compute commitment to advice trace
     let (advice_commit, advice_data) =
-        info_span!("commit to advice trace data").in_scope(|| pcs.commit_batch(advice.as_view()));
+        info_span!("commit to advice trace data").in_scope(|| pcs.commit_batch(advice.clone()));
 
     // Observe commitment to advice trace
     challenger.observe(advice_commit.clone());
@@ -102,7 +103,7 @@ pub fn prove<C, E>(
         let fixed = TwoRowMatrixView::new(fixed.row_slice(i), fixed.row_slice(next));
         let advice = TwoRowMatrixView::new(advice.row_slice(i), advice.row_slice(next));
         let id = TwoRowMatrixView::new(id.row_slice(i), id.row_slice(next));
-        E::eval_multiset(&gamma, id, fixed, advice, target);
+        E::eval_multiset(&gamma, &id, &fixed, &advice, target);
     });
 
     let multiset_a_inverse = RowMajorMatrix::new(batch_multiplicative_inverse(multiset_a.values.as_slice()), E::MULTISET_WIDTH);
@@ -143,21 +144,28 @@ pub fn prove<C, E>(
 
     // Compute commitment to partial sum multiset trace
     let (multiset_f_commit, multiset_f_data) =
-        info_span!("commit to multiset trace data").in_scope(|| pcs.commit_batch(multiset_f_values.as_view()));
+        info_span!("commit to multiset trace data").in_scope(|| {
+            pcs.commit_batch(multiset_f_values)
+        });
 
     // Observe commitment to partial sum multiset trace
-
     challenger.observe(multiset_f_commit.clone());
 
     // Observe multiset sum values
     challenger.observe_slice(to_values_matrix::<C>(&multiset_s).values.as_slice());
 
     // Get PLONK alpha random linear combination challenge
-    let alpha = challenger.sample_ext_element::<C::Challenge>();
+    // Multiply it by extension field monomials for fast evaluation
+    let alpha = challenger.sample_ext_element::<C::Challenge>()
+        .powers().take(E::NUM_GATES)
+        .flat_map(|x| (0..C::Challenge::D).map(move |i| C::Challenge::monomial(i)*x))
+        .collect_vec();
+
+    let alpha_packed = alpha.iter().map(|&x| C::PackedChallenge::from_f(x)).collect_vec();
 
     // Compute quotient polynomial
 
-    let _ = {
+    let quotient_values = {
         let fixed_lde = {
             let mut t = pcs.get_ldes(&fixed_data);
             assert_eq!(t.len(), 1);
@@ -182,17 +190,19 @@ pub fn prove<C, E>(
         let zerofier_on_coset = ZerofierOnCoset::new(log_degree, log_quotient_degree, coset_shift);
 
 
-        let coset = cyclic_subgroup_coset_known_order(g_extended, coset_shift, log_quotent_size).collect_vec();
-        let quotient_size = 1 << log_quotent_size;
+        let coset = cyclic_subgroup_coset_known_order(g_extended, coset_shift, log_quotient_size).collect_vec();
+        let quotient_size = 1 << log_quotient_size;
 
         let next_step = 1 << log_quotient_degree;
 
-        let multiset_s = TwoRowMatrixView::new(multiset_s.row_slice(0), multiset_s.row_slice(0));
+        let multiset_s = multiset_s.map(|e| C::PackedChallenge::from_f(e));
+
+
 
         (0..quotient_size)
             .into_par_iter()
             .step_by(C::PackedVal::WIDTH)
-            .flat_map_iter(|i_local_start| {
+            .flat_map_iter(move |i_local_start| {
                 let wrap = |i| -> usize { if i < quotient_size { i } else { i - quotient_size } };
 
                 let i_next_start = wrap(i_local_start + next_step);
@@ -210,7 +220,7 @@ pub fn prove<C, E>(
                         (0..m.width()).step_by(C::PackedChallenge::D).map(move |col| {
                             C::PackedChallenge::from_base_fn(|h_offset| {
                                 C::PackedVal::from_fn(|v_offset| {
-                                    let row = wrap(i + v_offset);
+                                    let row = wrap(i + v_offset)*row_multiplier;
                                     m.get(row, col + h_offset)
                                 })
                             })
@@ -224,43 +234,102 @@ pub fn prove<C, E>(
                         .iter().flat_map(|&i|
                         (0..m.width()).map(move |col| {
                             C::PackedVal::from_fn(|v_offset| {
-                                let row = wrap(i + v_offset);
+                                let row = wrap(i + v_offset)*row_multiplier;
                                 m.get(row, col)
                             })
                         })).collect_vec();
                     RowMajorMatrix::new(values, m.width())
                 };
 
-                let fixed_data = to_value_matrix(&fixed_lde);
-                let fixed = as_two_row_view(&fixed_data);
-                let advice_data = to_value_matrix(&advice_lde);
-                let advice = as_two_row_view(&advice_data);
-                let multiset_f_data = to_challenge_matrix(&multiset_f_lde);
-                let multiset_f = as_two_row_view(&multiset_f_data);
-                let id_data = E::id_matrix_at(x_local, x_next);
-                let id = as_two_row_view(&id_data);
+                let fixed = to_value_matrix(&fixed_lde);
+
+                let advice = to_value_matrix(&advice_lde);
+
+                let multiset_f = to_challenge_matrix(&multiset_f_lde);
+
+                let id = E::id_matrix_at(x_local, x_next);
+
 
                 let mut multiset_a = RowMajorMatrix::new(vec![C::PackedChallenge::zero(); 2*E::MULTISET_WIDTH], E::MULTISET_WIDTH);
 
-                let multiset_a = E::eval_multiset(&gamma_packed, id, fixed, advice, &mut multiset_a.values[0..E::MULTISET_WIDTH]);
+                E::eval_multiset(&gamma_packed, &id, &fixed, &advice, &mut multiset_a.values);
 
-                panic!("TODO: finish this part");
-                core::iter::once(C::Challenge::zero())
 
-            });
+                let expr = E::eval_gates(&alpha_packed, &fixed, &advice, &multiset_f, &multiset_a, &multiset_s);
+                let zeroifier_inv:C::PackedVal = zerofier_on_coset.eval_inverse_packed(i_local_start);
+
+                let quotient = expr * zeroifier_inv;
+
+
+                (0..C::PackedVal::WIDTH).map(move |idx_in_packing| {
+                    let quotient_value = (0..C::Challenge::D)
+                        .map(|coeff_idx| quotient.as_base_slice()[coeff_idx].as_slice()[idx_in_packing])
+                        .collect_vec();
+                    C::Challenge::from_base_slice(&quotient_value)
+                })
+
+            }).collect::<Vec<_>>()
     };
+
+    let quotient_chunks_flattened = info_span!("decompose quotient polynomial").in_scope(|| {
+        decompose_and_flatten::<C>(
+            quotient_values,
+            C::Challenge::from_base(pcs.coset_shift()),
+            log_quotient_degree,
+        )
+    });
+
 
     // Compute commitment to quotient polynomial
 
+    let (quotient_commit, quotient_data) =
+        info_span!("commit to quotient poly chunks").in_scope(|| {
+            pcs.commit_shifted_batch(
+                quotient_chunks_flattened,
+                pcs.coset_shift().exp_power_of_2(log_quotient_degree),
+            )
+        });
+
     // Observe commitment to quotient polynomial
 
-    // Get PLONK beta Schwartz-Zippel challenge
+    challenger.observe(quotient_commit.clone());
 
-    // Compute openings at beta and beta*g for all trace polynomials
+    // Get PLONK zeta Schwartz-Zippel challenge
 
-    // Compute openings at beta for quotient polynomial
+    let zeta: C::Challenge = challenger.sample_ext_element();
+
+    // Compute openings at zeta and beta*g for all trace polynomials
+    // Compute openings at zeta for quotient polynomial
+
+    let (opened_values, opening_proof) = pcs.open_multi_batches(
+        &[
+            (&fixed_data, &[zeta, zeta * g_subgroup]),
+            (&advice_data, &[zeta, zeta * g_subgroup]),
+            (&multiset_f_data, &[zeta, zeta * g_subgroup]),
+            (&quotient_data, &[zeta.exp_power_of_2(log_quotient_degree)]),
+        ],
+        challenger,
+    );
 
     // Build proof object from all commitments and openings
 
-    todo!();
+    Proof {
+        commitments: Commitments {
+            fixed: fixed_commit,
+            advice: advice_commit,
+            multiset_f: multiset_f_commit,
+            quotient: quotient_commit,
+        },
+        opened_values: OpenedValues {
+            fixed_local: opened_values[0][0][0].clone(),
+            fixed_next: opened_values[0][1][0].clone(),
+            advice_local: opened_values[1][0][0].clone(),
+            advice_next: opened_values[1][1][0].clone(),
+            multiset_f_local: opened_values[2][0][0].clone(),
+            multiset_f_next: opened_values[2][1][0].clone(),
+            quotient: opened_values[3][0][0].clone(),
+        },
+        opening_proof,
+        multiset_sums: multiset_s.values
+    }
 }

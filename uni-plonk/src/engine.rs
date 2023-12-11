@@ -1,6 +1,6 @@
 use p3_field::{AbstractExtensionField, AbstractField, ExtensionField, Field, TwoAdicField};
 use p3_air::TwoRowMatrixView;
-use p3_matrix::dense::RowMajorMatrix;
+use p3_matrix::{dense::RowMajorMatrix, MatrixRowSlices};
 
 pub trait Engine {
     type F: TwoAdicField;
@@ -10,17 +10,21 @@ pub trait Engine {
     const MAX_MULTISET_ELEMENT_WIDTH: usize;
     const MULTISET_WIDTH: usize;
     const ID_WIDTH: usize;
+    const NUM_GATES: usize;
     fn eval_gates<BaseF, ExtF>(multiplier: &[ExtF],
-                               fixed: TwoRowMatrixView<BaseF>,
-                               advice: TwoRowMatrixView<BaseF>,
-                               multiset_f: TwoRowMatrixView<ExtF>,
-                               multiset_a: TwoRowMatrixView<ExtF>,
-                               multiset_s: TwoRowMatrixView<ExtF>,
-                               target:&mut ExtF)
+                               fixed: &impl MatrixRowSlices<BaseF>,
+                               advice: &impl MatrixRowSlices<BaseF>,
+                               multiset_f: &impl MatrixRowSlices<ExtF>,
+                               multiset_a: &impl MatrixRowSlices<ExtF>,
+                               multiset_s: &impl MatrixRowSlices<ExtF>) -> ExtF
         where BaseF: AbstractField<F=Self::F> + Copy,
               ExtF: AbstractExtensionField<BaseF, F=Self::EF> + Copy;
 
-    fn eval_multiset<BaseF, ExtF>(multiplier: &[ExtF], id: TwoRowMatrixView<BaseF>, fixed: TwoRowMatrixView<BaseF>, advice: TwoRowMatrixView<BaseF>, target:&mut [ExtF])
+    fn eval_multiset<BaseF, ExtF>(multiplier: &[ExtF],
+                                  id: &impl MatrixRowSlices<BaseF>,
+                                  fixed: &impl MatrixRowSlices<BaseF>,
+                                  advice: &impl MatrixRowSlices<BaseF>,
+                                  target:&mut [ExtF])
         where BaseF: AbstractField<F=Self::F> + Copy,
               ExtF: AbstractExtensionField<BaseF, F=Self::EF> + Copy;
     
