@@ -13,7 +13,8 @@ pub struct Proof<C: Config> {
     pub(crate) commitments: Commitments<Com<C>>,
     pub(crate) opened_values: OpenedValues<C::Challenge>,
     pub(crate) opening_proof: PcsProof<C>,
-    pub(crate) multiset_sums: Vec<C::Challenge>
+    pub(crate) multiset_sums: Vec<C::Challenge>,
+    pub(crate) log_degree: u64
 }
 
 

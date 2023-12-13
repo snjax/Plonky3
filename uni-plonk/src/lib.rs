@@ -9,7 +9,13 @@ mod standard_plonk;
 mod config;
 mod decompose;
 mod proof;
+mod verifier;
 
 pub use engine::*;
 pub use config::*;
-pub use standard_plonk::*;
+pub use decompose::*;
+pub use proof::*;
+pub use verifier::*;
+pub use prover::*;
+pub use verifier::*;
+

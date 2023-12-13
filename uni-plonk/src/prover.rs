@@ -21,15 +21,19 @@ use crate::proof::{Proof, Commitments, OpenedValues};
 use crate::engine::Engine;
 
 
-
-
-pub fn to_values_matrix<C:Config>(m:&RowMajorMatrix<C::Challenge>) -> RowMajorMatrix<C::Val> {
-    let mut values = Vec::with_capacity(m.values.len() * C::Challenge::D);
-    for c in m.values.as_slice() {
+pub fn to_values<C:Config>(m:&[C::Challenge]) -> Vec<C::Val> {
+    let mut values = Vec::with_capacity(m.len() * C::Challenge::D);
+    for c in m {
         values.extend(c.as_base_slice());
     }
-    RowMajorMatrix::new(values, m.width() * C::Challenge::D)
+    values
 }
+
+pub fn to_values_matrix<C:Config>(m:&RowMajorMatrix<C::Challenge>) -> RowMajorMatrix<C::Val> {
+    RowMajorMatrix::new(to_values::<C>(&m.values), m.width() * C::Challenge::D)
+}
+
+
 
 
 #[instrument(skip_all)]
@@ -330,6 +334,7 @@ pub fn prove<C, E>(
             quotient: opened_values[3][0][0].clone(),
         },
         opening_proof,
-        multiset_sums: multiset_s.values
+        multiset_sums: multiset_s.values,
+        log_degree: log_degree as u64,
     }
 }
