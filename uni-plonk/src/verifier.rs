@@ -1,5 +1,6 @@
 use alloc::vec;
 use alloc::vec::Vec;
+use itertools::Itertools;
 
 use p3_air::{Air, TwoRowMatrixView};
 use p3_challenger::{CanObserve, FieldChallenger};
@@ -48,6 +49,50 @@ pub fn verify<C, E>(
     challenger.observe(commitments.quotient.clone());
 
     let zeta:C::Challenge = challenger.sample_ext_element();
+
+    let local_and_next = [zeta, zeta * g_subgroup];
+
+    let commits_and_points = &[
+        (commitments.fixed.clone(), local_and_next.as_slice()),
+        (commitments.advice.clone(), local_and_next.as_slice()),
+        (commitments.multiset_f.clone(), local_and_next.as_slice()),
+        (commitments.quotient.clone(), &[zeta.exp_power_of_2(log_quotient_degree)]),
+    ];
+
+    let values = vec![
+        vec![vec![
+            opened_values.fixed_local.clone(),
+            opened_values.fixed_next.clone(),
+        ]],
+        vec![vec![
+            opened_values.advice_local.clone(),
+            opened_values.advice_next.clone(),
+        ]],
+        vec![vec![
+            opened_values.multiset_f_local.clone(),
+            opened_values.multiset_f_next.clone(),
+        ]],
+        vec![vec![opened_values.quotient.clone()]],
+    ];
+
+    config.pcs().verify_multi_batches(commits_and_points, values, opening_proof, challenger)
+        .map_err(|_| VerificationError::InvalidOpeningArgument)?;
+
+
+    let quotient: C::Challenge = {
+        let mut parts = opened_values
+            .quotient
+            .chunks(C::Challenge::D)
+            .map(|chunk| {
+                chunk
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &c)| C::Challenge::monomial(i) * c)
+                    .sum()
+            }).collect::<Vec<C::Challenge>>();
+        reverse_slice_index_bits(&mut parts);
+        zeta.powers().zip(parts).map(|(zeta, part)| zeta * part).sum()
+    };
 
     // TODO finalize verifier
 
