@@ -18,6 +18,8 @@ tracing = "0.1.37"
 p3-uni-stark = { path = "../uni-stark" }
 diff = "0.1.13"
 rand = "0.8.5"
+hashbrown = { version = "0.14.0", default-features = false, features = ["ahash"] }
+
 
 [dev-dependencies]
 p3-blake3 = { path = "../blake3" }

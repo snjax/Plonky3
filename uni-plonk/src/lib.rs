@@ -10,6 +10,7 @@ mod config;
 mod decompose;
 mod proof;
 mod verifier;
+mod circuit_builder;
 
 pub use engine::*;
 pub use config::*;
