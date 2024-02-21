@@ -7,7 +7,7 @@ use p3_util::log2_ceil_usize;
 use alloc::vec;
 
 
-fn repr_as<T,S>(src:&[T]) -> &S {
+pub fn repr_as<T, S>(src: &[T]) -> &S {
     let (prefix, shorts, suffix) = unsafe { src.align_to::<S>() };
     debug_assert!(prefix.is_empty(), "Data was not aligned");
     debug_assert!(suffix.is_empty(), "Data was not aligned");
@@ -15,9 +15,7 @@ fn repr_as<T,S>(src:&[T]) -> &S {
     &shorts[0]
 }
 
-
-
-fn repr_as_mut<T,S>(src:&mut [T]) -> &mut S {
+pub fn repr_as_mut<T, S>(src: &mut [T]) -> &mut S {
     let (prefix, shorts, suffix) = unsafe { src.align_to_mut::<S>() };
     debug_assert!(prefix.is_empty(), "Data was not aligned");
     debug_assert!(suffix.is_empty(), "Data was not aligned");
@@ -46,44 +44,65 @@ fn rlc_mul<E:Engine,
     multiplier[offset*ExtF::D] * expr
 }
 
-struct Q<T> {
-    l: T,
-    r: T,
-    o: T,
-    m: T,
-    c: T
+pub struct Q<T> {
+    pub l: T,
+    pub r: T,
+    pub o: T,
+    pub m: T,
+    pub c: T,
 }
 
-
-struct X<T> {
-    a: T,
-    b: T,
-    c: T,
+pub struct X<T> {
+    pub a: T,
+    pub b: T,
+    pub c: T,
 }
 
-struct LookupTable<T> {
-    op: T,
-    x: X<T>
+pub struct LookupTable<T> {
+    pub op: T,
+    pub x: X<T>,
 }
 
-struct Fixed<T> {
-    q: Q<T>,
-    sigma: X<T>,
-    selector: T,
-    op: T,
-    table: LookupTable<T>
+pub struct Fixed<T> {
+    pub q: Q<T>,
+    pub sigma: X<T>,
+    pub selector: T,
+    pub op: T,
+    pub table: LookupTable<T>,
 }
 
-struct Advice<T> {
-    x: X<T>,
-    lookup_right_m: T
+impl<T> Fixed<T> {
+    pub fn as_slice(&self) -> &[T] {
+        unsafe {
+            core::slice::from_raw_parts(
+                self as *const Self as *const T,
+                core::mem::size_of::<Self>() / core::mem::size_of::<T>(),
+            )
+        }
+    }
 }
 
-struct Multiset<T> {
-    id: X<T>,
-    sigma: X<T>,
-    lookup_left: T,
-    lookup_right: T
+pub struct Advice<T> {
+    pub x: X<T>,
+    pub lookup_right_m: T,
+}
+
+impl<T> Advice<T> {
+    pub fn as_slice(&self) -> &[T] {
+        unsafe {
+            core::slice::from_raw_parts(
+                self as *const Self as *const T,
+                core::mem::size_of::<Self>() / core::mem::size_of::<T>(),
+            )
+        }
+    }
+}
+
+pub struct Multiset<T> {
+    pub id: X<T>,
+    pub sigma: X<T>,
+    pub lookup_left: T,
+    pub lookup_right: T,
 }
 
 pub struct Plonk<T>(PhantomData<T>);
