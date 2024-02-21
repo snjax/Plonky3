@@ -47,8 +47,8 @@ impl<F: PrimeField> CircuitBuilder<F> {
             var_index: 0,
             gate_index: 0,
             fixed_rows: vec![F::zero(); 2usize.pow(n as u32) * 14],
-            advice_rows: vec![F::zero(); 2usize.pow(n as u32) * 3],
-            values: vec![F::zero(); 2usize.pow(n as u32) * 3],
+            advice_rows: vec![F::zero(); 2usize.pow(n as u32) * 4],
+            values: vec![F::zero(); 2usize.pow(n as u32) * 4],
         }
     }
 
@@ -66,28 +66,31 @@ impl<F: PrimeField> CircuitBuilder<F> {
 
     // pub fn set_value(&mut self, var: Var, val: F) {}
 
-    pub fn add(&mut self, a: Var, b: Var) {
+    pub fn add(&mut self, a: Var, b: Var) -> Var {
         let c = self.alloc();
         self.enforce(
             &[F::one(), F::one(), -F::one(), F::zero(), F::zero()],
             &[a, b, c],
         );
+        c
     }
 
-    pub fn add_constant(&mut self, a: Var, b: F) {
+    pub fn add_constant(&mut self, a: Var, b: F) -> Var {
         let c = self.alloc();
         self.enforce(
             &[F::one(), F::zero(), -F::one(), F::zero(), b],
             &[a, Var(Index::Input(0)), c],
         );
+        c
     }
 
-    pub fn mul(&mut self, a: Var, b: Var) {
+    pub fn mul(&mut self, a: Var, b: Var) -> Var {
         let c = self.alloc();
         self.enforce(
             &[F::zero(), F::zero(), -F::one(), F::one(), F::zero()],
             &[a, b, c],
         );
+        c
     }
 
     pub fn enforce(&mut self, fixed: &[F], advice: &[Var]) {
@@ -164,18 +167,17 @@ mod tests {
         let mut builder = CircuitBuilder::<BabyBear>::new(2);
         let a = builder.alloc_input();
         let b = builder.alloc_input();
-        let c = builder.alloc_input();
-        builder.add(a, b);
-        builder.add(b, c);
-        builder.add_constant(c, BabyBear::from_canonical_u32(42));
+        let c = builder.add(a, b);
+        let d = builder.add(b, c);
+        builder.add_constant(d, BabyBear::from_canonical_u32(42));
 
         let (fixed, advice) = builder.build();
 
-        let mut string = String::new();
-        for row in fixed.rows() {
-            string.push_str(&format!("{:?}\n", row));
-        }
-        panic!("{}", string);
+        // let mut string = String::new();
+        // for row in fixed.rows() {
+        //     string.push_str(&format!("{:?}\n", row));
+        // }
+        // panic!("{}", string);
 
         assert_eq!(fixed.rows().count(), 4);
         assert_eq!(advice.rows().count(), 4);
