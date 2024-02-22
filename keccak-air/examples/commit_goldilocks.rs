@@ -1,14 +1,14 @@
 use p3_challenger::{DuplexChallenger, FieldChallenger};
-use p3_commit::{ExtensionMmcs, Pcs, UnivariatePcs};
+use p3_commit::{ExtensionMmcs, OpenedValues, Pcs, UnivariatePcs};
 use p3_dft::Radix2DitParallel;
 use p3_field::extension::BinomialExtensionField;
 use p3_field::Field;
-use p3_fri::{FriBasedPcs, FriConfigImpl, FriLdt};
+use p3_fri::{FriBasedPcs, FriConfigImpl, FriLdt, FriProof};
 use p3_goldilocks::Goldilocks;
 use p3_keccak::Keccak256Hash;
-use p3_ldt::QuotientMmcs;
+use p3_ldt::{LdtBasedPcs, QuotientMmcs};
 use p3_mds::coset_mds::CosetMds;
-use p3_merkle_tree::FieldMerkleTreeMmcs;
+use p3_merkle_tree::{FieldMerkleTree, FieldMerkleTreeMmcs};
 use p3_poseidon2::{DiffusionMatrixGoldilocks, Poseidon2};
 use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher64};
 use p3_uni_stark::{prove, verify, StarkConfigImpl, VerificationError};
@@ -68,21 +68,26 @@ fn main() -> Result<(), VerificationError> {
     type MyConfig = StarkConfigImpl<Val, Challenge, PackedChallenge, Pcs, Challenger>;
 
     let pcs = Pcs::new(dft, val_mmcs, ldt);
-    // let config = StarkConfigImpl::new(pcs);
+    // let _config = StarkConfigImpl::new(pcs);
 
-    for i in 0..16 {
-        let n = 2usize.pow(i);
-        tracing::info!("{n} rows");
+    let fsize_bytes = core::mem::size_of::<Goldilocks>();
 
-        let inputs = (0..n).map(|_| random()).collect::<Vec<_>>();
+    let kilo = 2usize.pow(10);
+    let mega = 2usize.pow(20);
+    let giga = 2usize.pow(30);
+
+    for n_bytes in [kilo, 128 * kilo, 512 * kilo, mega, 128 * mega, 512 * mega, giga].iter() {
+        let n_rows = n_bytes / fsize_bytes;
+        tracing::info!("{n_bytes} bytes, {n_rows} rows:");
+
+        let inputs = (0..n_rows).map(|_| random()).collect::<Vec<_>>();
         let data = RowMajorMatrix::new(inputs.clone(), 1);
-        let (commitment, prover_data) = pcs.commit_batch(data);
+        let (commitment, prover_data): ([Val; 4], FieldMerkleTree<Val, 4>) = pcs.commit_batch(data);
+
+        let mut challenger = Challenger::new(perm.clone());
+        let zeta: Challenge = challenger.sample_ext_element();
+        <LdtBasedPcs<_, _, _, _, _, _> as UnivariatePcs<_, _, RowMajorMatrix<Val>, _>>::open_multi_batches(&pcs, &[(&prover_data, &[zeta])], &mut challenger);
     }
-
-
-    // let mut challenger = Challenger::new(perm.clone());
-    // let zeta = challenger.sample_ext_element();
-    // let (opened_values, proof) = pcs.open_multi_batches(&[(&prover_data, &[zeta])], &mut challenger);
 
     Ok(())
 }
