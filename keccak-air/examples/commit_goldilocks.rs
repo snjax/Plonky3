@@ -70,11 +70,15 @@ fn main() -> Result<(), VerificationError> {
     let pcs = Pcs::new(dft, val_mmcs, ldt);
     // let config = StarkConfigImpl::new(pcs);
 
-    const NUM_INPUTS: usize = 2usize.pow(0);
+    for i in 0..16 {
+        let n = 2usize.pow(i);
+        tracing::info!("{n} rows");
 
-    let inputs = (0..NUM_INPUTS).map(|_| random()).collect::<Vec<_>>();
-    let data = RowMajorMatrix::new(inputs.clone(), 1);
-    let (commitment, prover_data) = pcs.commit_batch(data);
+        let inputs = (0..n).map(|_| random()).collect::<Vec<_>>();
+        let data = RowMajorMatrix::new(inputs.clone(), 1);
+        let (commitment, prover_data) = pcs.commit_batch(data);
+    }
+
 
     // let mut challenger = Challenger::new(perm.clone());
     // let zeta = challenger.sample_ext_element();
