@@ -38,3 +38,6 @@ name = "prove_baby_bear_poseidon2"
 
 [[example]]
 name = "prove_goldilocks_keccak"
+
+[[example]]
+name = "commit_goldilocks"
