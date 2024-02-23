@@ -1,9 +1,9 @@
 use p3_challenger::{DuplexChallenger, FieldChallenger};
-use p3_commit::{ExtensionMmcs, OpenedValues, Pcs, UnivariatePcs};
+use p3_commit::{ExtensionMmcs, Pcs, UnivariatePcs};
 use p3_dft::Radix2DitParallel;
 use p3_field::extension::BinomialExtensionField;
 use p3_field::Field;
-use p3_fri::{FriBasedPcs, FriConfigImpl, FriLdt, FriProof};
+use p3_fri::{FriBasedPcs, FriConfigImpl, FriLdt};
 use p3_goldilocks::Goldilocks;
 use p3_keccak::Keccak256Hash;
 use p3_ldt::{LdtBasedPcs, QuotientMmcs};
@@ -11,14 +11,13 @@ use p3_mds::coset_mds::CosetMds;
 use p3_merkle_tree::{FieldMerkleTree, FieldMerkleTreeMmcs};
 use p3_poseidon2::{DiffusionMatrixGoldilocks, Poseidon2};
 use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher64};
-use p3_uni_stark::{prove, verify, StarkConfigImpl, VerificationError};
+use p3_uni_stark::VerificationError;
 use rand::{random, thread_rng};
 use tracing_forest::util::LevelFilter;
 use tracing_forest::ForestLayer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Registry};
-use p3_keccak_air::KeccakAir;
 use p3_matrix::dense::RowMajorMatrix;
 
 
@@ -65,7 +64,7 @@ fn main() -> Result<(), VerificationError> {
     let ldt = FriLdt { config: fri_config };
 
     type Pcs = FriBasedPcs<MyFriConfig, ValMmcs, Dft, Challenger>;
-    type MyConfig = StarkConfigImpl<Val, Challenge, PackedChallenge, Pcs, Challenger>;
+    // type MyConfig = StarkConfigImpl<Val, Challenge, PackedChallenge, Pcs, Challenger>;
 
     let pcs = Pcs::new(dft, val_mmcs, ldt);
     // let _config = StarkConfigImpl::new(pcs);
@@ -74,15 +73,22 @@ fn main() -> Result<(), VerificationError> {
 
     let kilo = 2usize.pow(10);
     let mega = 2usize.pow(20);
-    let giga = 2usize.pow(30);
 
-    for n_bytes in [kilo, 128 * kilo, 512 * kilo, mega, 128 * mega, 512 * mega, giga].iter() {
+    let sizes = [
+        (128 * kilo, "128 KiB"),
+        (512 * kilo, "512 KiB"),
+        (16 * mega, "16 MiB"),
+        (64 * mega, "64 MiB"),
+        (128 * mega, "128 MiB"),
+    ];
+
+    for (n_bytes, label) in sizes.iter() {
         let n_rows = n_bytes / fsize_bytes;
-        tracing::info!("{n_bytes} bytes, {n_rows} rows:");
+        tracing::info!("{label}, {n_rows} rows:");
 
         let inputs = (0..n_rows).map(|_| random()).collect::<Vec<_>>();
         let data = RowMajorMatrix::new(inputs.clone(), 1);
-        let (commitment, prover_data): ([Val; 4], FieldMerkleTree<Val, 4>) = pcs.commit_batch(data);
+        let (_commitment, prover_data): ([Val; 4], FieldMerkleTree<Val, 4>) = pcs.commit_batch(data);
 
         let mut challenger = Challenger::new(perm.clone());
         let zeta: Challenge = challenger.sample_ext_element();
