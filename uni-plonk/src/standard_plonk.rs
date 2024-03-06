@@ -44,6 +44,7 @@ fn rlc_mul<E:Engine,
     multiplier[offset*ExtF::D] * expr
 }
 
+#[derive(Clone)]
 pub struct Q<T> {
     pub l: T,
     pub r: T,
@@ -52,17 +53,20 @@ pub struct Q<T> {
     pub c: T,
 }
 
+#[derive(Clone)]
 pub struct X<T> {
     pub a: T,
     pub b: T,
     pub c: T,
 }
 
+#[derive(Clone)]
 pub struct LookupTable<T> {
     pub op: T,
     pub x: X<T>,
 }
 
+#[derive(Clone)]
 pub struct Fixed<T> {
     pub q: Q<T>,
     pub sigma: X<T>,
@@ -82,6 +86,7 @@ impl<T> Fixed<T> {
     }
 }
 
+#[derive(Clone)]
 pub struct Advice<T> {
     pub x: X<T>,
     pub lookup_right_m: T,
