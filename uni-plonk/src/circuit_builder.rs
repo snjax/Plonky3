@@ -57,7 +57,6 @@ impl<F: PrimeField64> AdviceTable<F> for Vec<F> {
         self[start..end].copy_from_slice(advice.as_slice());
     }
 
-    // TODO: Offset index by -1?
     fn get(&self, index: usize) -> F {
         self[index + (index / (Self::STRIDE - 1))]
     }
@@ -261,27 +260,19 @@ impl<F: PrimeField64, A: AdviceTable<F>> CircuitBuilder<F, A> {
             self.advice.set_row(row, advice);
         }
 
+
+        // Pad the rows to the next power of two
+        let num_rows = self.fixed.len();
+        for _ in 0..num_rows.next_power_of_two() - num_rows {
+            self.fixed.push(Fixed::default());
+            self.advice.push(Advice::default());
+        }
+
+
         // TODO: Cast Vec<Fixed> to Vec<F> instead of allocating a new Vec.
         let mut fixed_rows = Vec::new();
         for fixed in &self.fixed {
             fixed_rows.extend_from_slice(fixed.as_slice());
-        }
-
-        // FIXME: hardcoded number of cols
-        let total_num_rows = self.fixed.len().next_power_of_two();
-        if fixed_rows.len() < total_num_rows * 14 {
-            fixed_rows.extend_from_slice(&vec![F::zero(); total_num_rows * 14 - fixed_rows.len()]);
-
-            for _ in 0..total_num_rows - fixed_rows.len() / 14 {
-                self.advice.push(Advice {
-                    x: X {
-                        a: F::zero(),
-                        b: F::zero(),
-                        c: F::zero(),
-                    },
-                    lookup_right_m: F::zero(),
-                });
-            }
         }
 
         (
@@ -308,7 +299,9 @@ mod tests {
     use p3_merkle_tree::FieldMerkleTreeMmcs;
     use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher64};
     use p3_uni_stark::{StarkConfigImpl, verify};
+    use p3_poseidon2::{DiffusionMatrixBabybear, DiffusionMatrixGoldilocks, Poseidon2};
     use crate::{ConfigImpl, prove};
+    use crate::standard_plonk::Plonk;
     use super::*;
 
     fn build_circuit<F: PrimeField64, T: AdviceTable<F>>(inputs: &[F]) -> (RowMajorMatrix<F>, T::Out) {
@@ -337,61 +330,61 @@ mod tests {
 
         // Build both fixed and advice
         let (fixed, advice) = build_circuit::<F, Vec<F>>(inputs.as_slice());
+
+        assert_eq!(fixed.rows().count(), 4);
+        assert_eq!(advice.rows().count(), 4);
     }
 
-    // #[test]
-    // fn test_circuit_builder_prove() {
-    //     type F = BabyBear;
-    //
-    //     type Val = Goldilocks;
-    //     type Domain = Val;
-    //     type Challenge = BinomialExtensionField<Val, 2>;
-    //     type PackedChallenge = BinomialExtensionField<<Domain as Field>::Packing, 2>;
-    //
-    //     type MyMds = CosetMds<Val, 8>;
-    //     let mds = MyMds::default();
-    //
-    //     type Perm = Poseidon2<Val, MyMds, DiffusionMatrixGoldilocks, 8, 5>;
-    //     let perm = Perm::new_from_rng(8, 22, mds, DiffusionMatrixGoldilocks, &mut thread_rng());
-    //
-    //     type MyHash = SerializingHasher64<Keccak256Hash>;
-    //     let hash = MyHash::new(Keccak256Hash {});
-    //     type MyCompress = CompressionFunctionFromHasher<Val, MyHash, 2, 4>;
-    //     let compress = MyCompress::new(hash);
-    //
-    //     type ValMmcs = FieldMerkleTreeMmcs<Val, MyHash, MyCompress, 4>;
-    //     let val_mmcs = ValMmcs::new(hash, compress);
-    //
-    //     type ChallengeMmcs = ExtensionMmcs<Val, Challenge, ValMmcs>;
-    //     let challenge_mmcs = ChallengeMmcs::new(val_mmcs.clone());
-    //
-    //     type Dft = Radix2DitParallel;
-    //     let dft = Dft {};
-    //
-    //     type Challenger = DuplexChallenger<Val, Perm, 8>;
-    //
-    //     type Quotient = QuotientMmcs<Domain, Challenge, ValMmcs>;
-    //     type MyFriConfig = FriConfigImpl<Val, Challenge, Quotient, ChallengeMmcs, Challenger>;
-    //     let fri_config = MyFriConfig::new(40, challenge_mmcs);
-    //     let ldt = FriLdt { config: fri_config };
-    //
-    //     type Pcs = FriBasedPcs<MyFriConfig, ValMmcs, Dft, Challenger>;
-    //     type MyConfig = StarkConfigImpl<Val, Challenge, PackedChallenge, Pcs, Challenger>;
-    //
-    //     let pcs = Pcs::new(dft, val_mmcs, ldt);
-    //     let config = ConfigImpl::new(pcs);
-    //     let mut challenger = Challenger::new(perm);
-    //
-    //
-    //
-    //     let inputs = vec![
-    //         F::from_canonical_u32(1),
-    //         F::from_canonical_u32(2),
-    //     ];
-    //
-    //     // Build both fixed and advice
-    //     let (fixed, advice) = build_circuit::<F, Vec<F>>(inputs.as_slice());
-    //
-    //     prove(config, &mut challenger, fixed, advice, RowMajorMatrix::new(inputs, 2));
-    // }
+    #[test]
+    fn test_circuit_builder_prove() {
+        type F = Goldilocks;
+        type Domain = F;
+        type Challenge = BinomialExtensionField<F, 2>;
+        type PackedChallenge = BinomialExtensionField<<Domain as Field>::Packing, 2>;
+
+        type MyMds = CosetMds<F, 8>;
+        let mds = MyMds::default();
+
+        type Perm = Poseidon2<F, MyMds, DiffusionMatrixGoldilocks, 8, 5>;
+        let perm = Perm::new_from_rng(8, 22, mds, DiffusionMatrixGoldilocks, &mut thread_rng());
+
+        type MyHash = SerializingHasher64<Keccak256Hash>;
+        let hash = MyHash::new(Keccak256Hash {});
+        type MyCompress = CompressionFunctionFromHasher<F, MyHash, 2, 4>;
+        let compress = MyCompress::new(hash);
+
+        type ValMmcs = FieldMerkleTreeMmcs<F, MyHash, MyCompress, 4>;
+        let val_mmcs = ValMmcs::new(hash, compress);
+
+        type ChallengeMmcs = ExtensionMmcs<F, Challenge, ValMmcs>;
+        let challenge_mmcs = ChallengeMmcs::new(val_mmcs.clone());
+
+        type Dft = Radix2DitParallel;
+        let dft = Dft {};
+
+        type Challenger = DuplexChallenger<F, Perm, 8>;
+
+        type Quotient = QuotientMmcs<Domain, Challenge, ValMmcs>;
+        type MyFriConfig = FriConfigImpl<F, Challenge, Quotient, ChallengeMmcs, Challenger>;
+        let fri_config = MyFriConfig::new(40, challenge_mmcs);
+        let ldt = FriLdt { config: fri_config };
+
+        type Pcs = FriBasedPcs<MyFriConfig, ValMmcs, Dft, Challenger>;
+        type MyConfig = ConfigImpl<F, Challenge, PackedChallenge, Pcs, Challenger>;
+
+        let pcs = Pcs::new(dft, val_mmcs, ldt);
+        let config = ConfigImpl::<F, Challenge, PackedChallenge, Pcs, Challenger>::new(pcs);
+        let mut challenger = Challenger::new(perm);
+
+
+        let inputs = vec![
+            F::from_canonical_u32(1),
+            F::from_canonical_u32(2),
+        ];
+
+        // Build both fixed and advice
+        let (fixed, advice) = build_circuit::<F, Vec<F>>(inputs.as_slice());
+
+        prove::<MyConfig, Plonk<(F, Challenge)>>(&config, &mut challenger, fixed, advice, RowMajorMatrix::new(inputs, 2));
+    }
 }

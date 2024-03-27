@@ -106,7 +106,7 @@ impl<T> Fixed<T> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Advice<T> {
     pub x: X<T>,
     pub lookup_right_m: T,
