@@ -9,19 +9,16 @@ use p3_matrix::dense::RowMajorMatrix;
 use crate::standard_plonk::{repr_as, Advice, Fixed, LookupTable, Q, X};
 
 #[derive(Debug, Clone, Copy)]
-pub struct Var(Index);
-
-#[derive(Debug, Clone, Copy)]
-pub enum Index {
+pub enum Var {
     Input(i64),
     Aux(i64),
 }
 
-impl Index {
+impl Var {
     pub fn index(self) -> i64 {
         match self {
-            Index::Input(i) => i,
-            Index::Aux(i) => i,
+            Var::Input(i) => i,
+            Var::Aux(i) => i,
         }
     }
 }
@@ -113,14 +110,14 @@ impl<F: PrimeField64, A: AdviceTable<F>> CircuitBuilder<F, A> {
     }
 
     pub fn alloc(&mut self) -> Var {
-        let var = Var(Index::Aux(self.var_index as i64));
+        let var = Var::Aux(self.var_index as i64);
         self.var_index += 1;
         var
     }
 
     pub fn alloc_input(&mut self) -> Var {
         let index = self.var_index;
-        let var = Var(Index::Input(index as i64));
+        let var = Var::Input(index as i64);
         self.var_index += 1;
         self.inputs.push(index);
         var
@@ -140,7 +137,7 @@ impl<F: PrimeField64, A: AdviceTable<F>> CircuitBuilder<F, A> {
         let c = self.alloc();
         self.enforce(
             &[F::one(), F::zero(), -F::one(), F::zero(), b],
-            &[a, Var(Index::Aux(-1)), c],
+            &[a, Var::Aux(-1), c],
         );
         c
     }
@@ -171,7 +168,7 @@ impl<F: PrimeField64, A: AdviceTable<F>> CircuitBuilder<F, A> {
 
         let mut sigma = [F::zero(); 3];
         for (i, var) in advice.iter().enumerate() {
-            let var_index = var.0.index();
+            let var_index = var.index();
             let witness_index = row + i;
 
             if var_index >= 0 && row > 0 {
@@ -190,7 +187,7 @@ impl<F: PrimeField64, A: AdviceTable<F>> CircuitBuilder<F, A> {
                 sigma[i] = g.exp_u64(witness_index as u64);
             }
 
-            self.wires.push(var.0.index());
+            self.wires.push(var.index());
         }
 
         let fixed = Fixed {
