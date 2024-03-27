@@ -44,7 +44,7 @@ fn rlc_mul<E:Engine,
     multiplier[offset*ExtF::D] * expr
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Q<T> {
     pub l: T,
     pub r: T,
@@ -53,20 +53,40 @@ pub struct Q<T> {
     pub c: T,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct X<T> {
     pub a: T,
     pub b: T,
     pub c: T,
 }
 
-#[derive(Clone)]
+impl<T> X<T> {
+    pub fn as_slice(&self) -> &[T] {
+        unsafe {
+            core::slice::from_raw_parts(
+                self as *const Self as *const T,
+                core::mem::size_of::<Self>() / core::mem::size_of::<T>(),
+            )
+        }
+    }
+
+    pub fn as_slice_mut(&mut self) -> &mut [T] {
+        unsafe {
+            core::slice::from_raw_parts_mut(
+                self as *mut Self as *mut T,
+                core::mem::size_of::<Self>() / core::mem::size_of::<T>(),
+            )
+        }
+    }
+}
+
+#[derive(Clone, Default)]
 pub struct LookupTable<T> {
     pub op: T,
     pub x: X<T>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Fixed<T> {
     pub q: Q<T>,
     pub sigma: X<T>,

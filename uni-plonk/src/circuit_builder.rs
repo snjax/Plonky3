@@ -1,8 +1,9 @@
 use alloc::vec;
 use alloc::vec::Vec;
 use itertools::Itertools;
+use rand::prelude::SliceRandom;
 
-use p3_field::{Field, PrimeField};
+use p3_field::{Field, PrimeField, PrimeField64};
 use p3_matrix::dense::RowMajorMatrix;
 
 use crate::standard_plonk::{repr_as, Advice, Fixed, LookupTable, Q, X};
@@ -12,15 +13,15 @@ pub struct Var(Index);
 
 #[derive(Debug, Clone, Copy)]
 pub enum Index {
-    Input(usize),
-    Aux(usize),
+    Input(i64),
+    Aux(i64),
 }
 
 impl Index {
-    pub fn index(&self) -> usize {
+    pub fn index(self) -> i64 {
         match self {
-            Index::Input(i) => *i,
-            Index::Aux(i) => *i,
+            Index::Input(i) => i,
+            Index::Aux(i) => i,
         }
     }
 }
@@ -29,35 +30,45 @@ impl Index {
 pub trait AdviceTable<F: PrimeField>: Default {
     type Out;
 
+    const STRIDE: usize = 4;
+
     fn push(&mut self, advice: Advice<F>);
     fn set_row(&mut self, index: usize, advice: Advice<F>);
 
-    fn get_row(&self, index: usize) -> Advice<F>;
+    /// Returns the value of witness at index.
+    fn get(&self, index: usize) -> F;
 
-    fn to_out(&self) -> Self::Out;
+    /// Sets the value of witness at index.
+    fn set(&mut self, index: usize, value: F);
+
+    fn to_out(self) -> Self::Out;
 }
 
-impl<F: PrimeField> AdviceTable<F> for Vec<Advice<F>> {
+impl<F: PrimeField64> AdviceTable<F> for Vec<F> {
     type Out = RowMajorMatrix<F>;
 
     fn push(&mut self, advice: Advice<F>) {
-        self.push(advice);
+        self.extend_from_slice(advice.as_slice());
     }
 
-    fn set_row(&mut self, index: usize, advice: Advice<F>) {
-        self[index] = advice;
+    fn set_row(&mut self, row_index: usize, advice: Advice<F>) {
+        let start = row_index * Self::STRIDE;
+        let end = start + Self::STRIDE;
+        self[start..end].copy_from_slice(advice.as_slice());
     }
 
-    fn get_row(&self, index: usize) -> Advice<F> {
-        self[index].clone()
+    // TODO: Offset index by -1?
+    fn get(&self, index: usize) -> F {
+        self[index + (index / (Self::STRIDE - 1))]
     }
 
-    fn to_out(&self) -> RowMajorMatrix<F> {
-        let mut rows = Vec::new();
-        for advice in self {
-            rows.extend_from_slice(advice.as_slice());
-        }
-        RowMajorMatrix::new(rows, 4)
+    fn set(&mut self, index: usize, value: F) {
+        self[index + (index / (Self::STRIDE - 1))] = value;
+    }
+
+
+    fn to_out(self) -> RowMajorMatrix<F> {
+        RowMajorMatrix::new(self, 4)
     }
 }
 
@@ -67,55 +78,53 @@ impl<F: PrimeField> AdviceTable<F> for () {
     fn push(&mut self, _advice: Advice<F>) {}
 
     fn set_row(&mut self, _index: usize, _advice: Advice<F>) {}
-
-    fn get_row(&self, _index: usize) -> Advice<F> {
-        Advice {
-            x: X {
-                a: F::zero(),
-                b: F::zero(),
-                c: F::zero(),
-            },
-            lookup_right_m: F::zero(),
-        }
+    #[inline]
+    fn get(&self, _index: usize) -> F {
+        F::zero()
     }
 
-    fn to_out(&self) {}
+    fn set(&mut self, _index: usize, _value: F) {}
+
+    fn to_out(self) {}
 }
 
-pub struct CircuitBuilder<F: PrimeField, A: AdviceTable<F>> {
+pub struct CircuitBuilder<F: PrimeField64, A: AdviceTable<F>> {
+    // TODO: Is there a better way to handle intermediate state?
     var_index: usize,
     fixed: Vec<Fixed<F>>,
     advice: A,
-    inputs: Vec<F>,
+
+    /// Mapping from input index to witness index
+    inputs: Vec<usize>,
+
+    wires: Vec<Var>,
 }
 
-impl<F: PrimeField, A: AdviceTable<F>> CircuitBuilder<F, A> {
+impl<F: PrimeField64, A: AdviceTable<F>> CircuitBuilder<F, A> {
     pub fn new() -> Self {
         // TODO: Preallocate space for fixed and advice
         CircuitBuilder {
-            var_index: 1,
+            var_index: 0,
             fixed: Vec::new(),
             advice: A::default(),
             inputs: Vec::new(),
+            wires: Vec::new(),
         }
     }
 
     pub fn alloc(&mut self) -> Var {
-        let var = Var(Index::Aux(self.var_index));
+        let var = Var(Index::Aux(self.var_index as i64));
         self.var_index += 1;
         var
     }
 
     pub fn alloc_input(&mut self) -> Var {
         let index = self.var_index;
-        let var = Var(Index::Input(index));
+        let var = Var(Index::Input(index as i64));
         self.var_index += 1;
-        // self.inputs.push(F::generator().exp_u64(index as u64));
-        self.inputs.push(F::from_canonical_usize(index));
+        self.inputs.push(index);
         var
     }
-
-    // pub fn set_value(&mut self, var: Var, val: F) {}
 
     pub fn add(&mut self, a: Var, b: Var) -> Var {
         let c = self.alloc();
@@ -127,10 +136,11 @@ impl<F: PrimeField, A: AdviceTable<F>> CircuitBuilder<F, A> {
     }
 
     pub fn add_constant(&mut self, a: Var, b: F) -> Var {
+        let _b = self.alloc();
         let c = self.alloc();
         self.enforce(
             &[F::one(), F::zero(), -F::one(), F::zero(), b],
-            &[a, Var(Index::Input(0)), c],
+            &[a, Var(Index::Aux(-1)), c],
         );
         c
     }
@@ -144,13 +154,44 @@ impl<F: PrimeField, A: AdviceTable<F>> CircuitBuilder<F, A> {
         c
     }
 
+    pub fn eq(&mut self, a: Var, b: Var) -> Var {
+        let c = self.alloc();
+        self.enforce(
+            &[F::one(), -F::one(), F::zero(), F::zero(), F::zero()],
+            &[a, b, c],
+        );
+        c
+    }
+
+    // TODO: Accept Q and X instead slices?
     pub fn enforce(&mut self, fixed: &[F], advice: &[Var]) {
         let zero = F::zero();
-        // let g = F::generator();
+        let g = F::generator();
+        let row = self.fixed.len();
 
-        let i_a = advice[0].0.index();
-        let i_b = advice[1].0.index();
-        let i_c = advice[2].0.index();
+        let mut sigma = [F::zero(); 3];
+        for (i, advice) in advice.iter().enumerate() {
+            let var_index = advice.0.index();
+            let witness_index = row + i;
+
+            if var_index >= 0 && row > 0 {
+                let wire_row_index = var_index / 3;
+                if wire_row_index as usize == row {
+                    let prev = sigma[var_index as usize % 3];
+                    sigma[i] = prev;
+                    sigma[var_index as usize % 3] = g.exp_u64(witness_index as u64);
+                } else {
+                    let prev_sigma = self.fixed[wire_row_index as usize].sigma.as_slice_mut();
+                    let prev_val = prev_sigma[i];
+                    prev_sigma[i] = g.exp_u64(witness_index as u64);
+                    sigma[i] = prev_val;
+                }
+            } else {
+                sigma[i] = g.exp_u64(witness_index as u64);
+            }
+
+            self.wires.push(*advice);
+        }
 
         let fixed = Fixed {
             q: Q {
@@ -160,14 +201,7 @@ impl<F: PrimeField, A: AdviceTable<F>> CircuitBuilder<F, A> {
                 m: fixed[3],
                 c: fixed[4],
             },
-            sigma: X {
-                // a: g.exp_u64(i_a as u64),
-                // b: g.exp_u64(i_b as u64),
-                // c: g.exp_u64(i_c as u64),
-                a: F::from_canonical_usize(i_a),
-                b: F::from_canonical_usize(i_b),
-                c: F::from_canonical_usize(i_c),
-            },
+            sigma: repr_as::<_, X<_>>(&sigma).clone(),
             selector: zero,
             op: zero,
             table: LookupTable {
@@ -193,58 +227,52 @@ impl<F: PrimeField, A: AdviceTable<F>> CircuitBuilder<F, A> {
         self.advice.push(advice);
     }
 
-    pub fn build(&mut self, inputs: &[F]) -> (RowMajorMatrix<F>, A::Out) {
-        let total_num_rows = self.fixed.len().next_power_of_two();
+    pub fn build(mut self, inputs: &[F]) -> (RowMajorMatrix<F>, A::Out) {
+        for (val, input_i) in inputs.iter().zip(self.inputs.iter()) {
+            self.advice.set(*input_i, *val);
+        }
 
-        for (i, Fixed { q, sigma, .. }) in self.fixed.iter().enumerate() {
-            // TODO: Optimize, DRY
-
-            // TODO: Implement a more convenient (searchable/indexable) intermediate representation
-            //       for fixed and advice.
-
-
-            // Calculate x values
-            let x_a = if let Some((in_i, _)) = self.inputs.iter().find_position(|&&x| x == sigma.a) {
-                inputs[in_i]
+        for (row, Fixed { q, .. }) in self.fixed.iter().enumerate() {
+            let xai = self.wires[row * 3].0.index();
+            let xbi = self.wires[row * 3 + 1].0.index();
+            let xa = if xai >= 0 {
+                self.advice.get(xai as usize)
             } else {
-                // 1. sigma.a to index
-                // 2. load value at index from advice
-
-                // FIXME: Linear search is no go here, use an index.
-                self.fixed[0..i].iter().find(|a| a.sigma.a == sigma.a).map(|a| self.advice.get_row(i).x.a).unwrap_or(F::zero())
+                F::zero()
             };
 
-            let x_b = if let Some((in_i, _)) = self.inputs.iter().find_position(|&&x| x == sigma.b) {
-                inputs[in_i]
+            let xb = if xbi >= 0 {
+                self.advice.get(xbi as usize)
             } else {
-                // FIXME: Index
-                self.fixed[0..i].iter().find(|a| a.sigma.b == sigma.b).map(|a| self.advice.get_row(i).x.b).unwrap_or(F::zero())
+                F::zero()
             };
 
-            let x_c = q.l * x_a + q.r * x_b + q.m * x_a * x_b + q.c;
+            let xc = q.l * xa + q.r * xb + q.m * xa * xb + q.c;
 
             let advice = Advice {
                 x: X {
-                    a: x_a,
-                    b: x_b,
-                    c: x_c,
+                    a: xa,
+                    b: xb,
+                    c: xc,
                 },
                 lookup_right_m: F::zero(),
             };
 
-            self.advice.set_row(i, advice);
+            self.advice.set_row(row, advice);
         }
 
+        // TODO: Cast Vec<Fixed> to Vec<F> instead of allocating a new Vec.
         let mut fixed_rows = Vec::new();
         for fixed in &self.fixed {
             fixed_rows.extend_from_slice(fixed.as_slice());
         }
 
         // FIXME: hardcoded number of cols
+        let total_num_rows = self.fixed.len().next_power_of_two();
         if fixed_rows.len() < total_num_rows * 14 {
             fixed_rows.extend_from_slice(&vec![F::zero(); total_num_rows * 14 - fixed_rows.len()]);
 
-            for _ in 0..total_num_rows - fixed_rows.len() {
+            for _ in 0..total_num_rows - fixed_rows.len() / 14 {
                 self.advice.push(Advice {
                     x: X {
                         a: F::zero(),
@@ -256,7 +284,6 @@ impl<F: PrimeField, A: AdviceTable<F>> CircuitBuilder<F, A> {
             }
         }
 
-
         (
             RowMajorMatrix::new(fixed_rows, 14),
             self.advice.to_out(),
@@ -266,23 +293,105 @@ impl<F: PrimeField, A: AdviceTable<F>> CircuitBuilder<F, A> {
 
 #[cfg(test)]
 mod tests {
+    use rand::{random, thread_rng};
     use p3_baby_bear::BabyBear;
+    use p3_challenger::DuplexChallenger;
+    use p3_commit::ExtensionMmcs;
+    use p3_dft::Radix2DitParallel;
     use p3_field::AbstractField;
+    use p3_field::extension::BinomialExtensionField;
+    use p3_fri::{FriBasedPcs, FriConfigImpl, FriLdt};
+    use p3_goldilocks::Goldilocks;
+    use p3_keccak::Keccak256Hash;
+    use p3_ldt::{LdtBasedPcs, QuotientMmcs};
+    use p3_mds::coset_mds::CosetMds;
+    use p3_merkle_tree::FieldMerkleTreeMmcs;
+    use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher64};
+    use p3_uni_stark::{StarkConfigImpl, verify};
+    use crate::{ConfigImpl, prove};
+    use super::*;
 
-    #[test]
-    fn test_circuit_builder_build() {
-        use super::*;
-
-        let mut builder = CircuitBuilder::<BabyBear, ()>::new();
+    fn build_circuit<F: PrimeField64, T: AdviceTable<F>>(inputs: &[F]) -> (RowMajorMatrix<F>, T::Out) {
+        let mut builder = CircuitBuilder::<F, T>::new();
         let a = builder.alloc_input();
         let b = builder.alloc_input();
         let c = builder.add(a, b);
-        let d = builder.add(b, c);
-        builder.add_constant(d, BabyBear::from_canonical_u32(42));
+        builder.add_constant(c, F::from_canonical_u32(42));
 
-        let (fixed, _) = builder.build(&[BabyBear::from_canonical_u32(1), BabyBear::from_canonical_u32(2)]);
+        builder.eq(c, c);
 
-        assert_eq!(fixed.rows().count(), 4);
-        // assert_eq!(advice.rows().count(), 4);
+        builder.build(inputs)
     }
+
+    #[test]
+    fn test_circuit_builder_build() {
+        type F = BabyBear;
+
+        let inputs = vec![
+            F::from_canonical_u32(1),
+            F::from_canonical_u32(2),
+        ];
+
+        // Build only fixed
+        let (fixed, advice) = build_circuit::<F, ()>(&[]);
+
+        // Build both fixed and advice
+        let (fixed, advice) = build_circuit::<F, Vec<F>>(inputs.as_slice());
+    }
+
+    // #[test]
+    // fn test_circuit_builder_prove() {
+    //     type F = BabyBear;
+    //
+    //     type Val = Goldilocks;
+    //     type Domain = Val;
+    //     type Challenge = BinomialExtensionField<Val, 2>;
+    //     type PackedChallenge = BinomialExtensionField<<Domain as Field>::Packing, 2>;
+    //
+    //     type MyMds = CosetMds<Val, 8>;
+    //     let mds = MyMds::default();
+    //
+    //     type Perm = Poseidon2<Val, MyMds, DiffusionMatrixGoldilocks, 8, 5>;
+    //     let perm = Perm::new_from_rng(8, 22, mds, DiffusionMatrixGoldilocks, &mut thread_rng());
+    //
+    //     type MyHash = SerializingHasher64<Keccak256Hash>;
+    //     let hash = MyHash::new(Keccak256Hash {});
+    //     type MyCompress = CompressionFunctionFromHasher<Val, MyHash, 2, 4>;
+    //     let compress = MyCompress::new(hash);
+    //
+    //     type ValMmcs = FieldMerkleTreeMmcs<Val, MyHash, MyCompress, 4>;
+    //     let val_mmcs = ValMmcs::new(hash, compress);
+    //
+    //     type ChallengeMmcs = ExtensionMmcs<Val, Challenge, ValMmcs>;
+    //     let challenge_mmcs = ChallengeMmcs::new(val_mmcs.clone());
+    //
+    //     type Dft = Radix2DitParallel;
+    //     let dft = Dft {};
+    //
+    //     type Challenger = DuplexChallenger<Val, Perm, 8>;
+    //
+    //     type Quotient = QuotientMmcs<Domain, Challenge, ValMmcs>;
+    //     type MyFriConfig = FriConfigImpl<Val, Challenge, Quotient, ChallengeMmcs, Challenger>;
+    //     let fri_config = MyFriConfig::new(40, challenge_mmcs);
+    //     let ldt = FriLdt { config: fri_config };
+    //
+    //     type Pcs = FriBasedPcs<MyFriConfig, ValMmcs, Dft, Challenger>;
+    //     type MyConfig = StarkConfigImpl<Val, Challenge, PackedChallenge, Pcs, Challenger>;
+    //
+    //     let pcs = Pcs::new(dft, val_mmcs, ldt);
+    //     let config = ConfigImpl::new(pcs);
+    //     let mut challenger = Challenger::new(perm);
+    //
+    //
+    //
+    //     let inputs = vec![
+    //         F::from_canonical_u32(1),
+    //         F::from_canonical_u32(2),
+    //     ];
+    //
+    //     // Build both fixed and advice
+    //     let (fixed, advice) = build_circuit::<F, Vec<F>>(inputs.as_slice());
+    //
+    //     prove(config, &mut challenger, fixed, advice, RowMajorMatrix::new(inputs, 2));
+    // }
 }
