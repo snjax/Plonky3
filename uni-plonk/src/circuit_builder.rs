@@ -93,10 +93,11 @@ pub struct CircuitBuilder<F: PrimeField64, A: AdviceTable<F>> {
     fixed: Vec<Fixed<F>>,
     advice: A,
 
-    /// Mapping from input index to witness index
+    /// Mapping input index to witness index
     inputs: Vec<usize>,
 
-    wires: Vec<Var>,
+    /// Mapping witness index to Var
+    wires: Vec<i64>,
 }
 
 impl<F: PrimeField64, A: AdviceTable<F>> CircuitBuilder<F, A> {
@@ -169,8 +170,8 @@ impl<F: PrimeField64, A: AdviceTable<F>> CircuitBuilder<F, A> {
         let row = self.fixed.len();
 
         let mut sigma = [F::zero(); 3];
-        for (i, advice) in advice.iter().enumerate() {
-            let var_index = advice.0.index();
+        for (i, var) in advice.iter().enumerate() {
+            let var_index = var.0.index();
             let witness_index = row + i;
 
             if var_index >= 0 && row > 0 {
@@ -189,7 +190,7 @@ impl<F: PrimeField64, A: AdviceTable<F>> CircuitBuilder<F, A> {
                 sigma[i] = g.exp_u64(witness_index as u64);
             }
 
-            self.wires.push(*advice);
+            self.wires.push(var.0.index());
         }
 
         let fixed = Fixed {
@@ -232,8 +233,8 @@ impl<F: PrimeField64, A: AdviceTable<F>> CircuitBuilder<F, A> {
         }
 
         for (row, Fixed { q, .. }) in self.fixed.iter().enumerate() {
-            let xai = self.wires[row * 3].0.index();
-            let xbi = self.wires[row * 3 + 1].0.index();
+            let xai = self.wires[row * 3];
+            let xbi = self.wires[row * 3 + 1];
             let xa = if xai >= 0 {
                 self.advice.get(xai as usize)
             } else {
