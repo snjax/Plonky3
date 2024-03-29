@@ -9,15 +9,27 @@ use p3_matrix::dense::RowMajorMatrix;
 use crate::standard_plonk::{repr_as, Advice, Fixed, LookupTable, Q, X};
 
 #[derive(Debug, Clone, Copy)]
-pub struct Var(i64);
+pub struct Var(u64);
 
 impl Var {
+    #[inline]
+    pub fn new(i: u64) -> Self {
+        Var(i + 1)
+    }
+    
+    #[inline]
     pub fn undefined() -> Self {
-        Var(-1)
+        Var(0)
     }
 
-    pub fn index(&self) -> i64 {
-        self.0
+    #[inline]
+    pub fn is_defined(&self) -> bool {
+        self.0 != 0
+    }
+    
+    #[inline]
+    pub fn index(&self) -> u64 {
+        self.0.saturating_sub(1)
     }
 }
 
@@ -92,7 +104,7 @@ pub struct CircuitBuilder<F: PrimeField64, A: AdviceTable<F>> {
     inputs: Vec<usize>,
 
     /// Mapping witness index to Var
-    wires: Vec<i64>,
+    wires: Vec<Var>,
 }
 
 impl<F: PrimeField64, A: AdviceTable<F>> CircuitBuilder<F, A> {
@@ -108,7 +120,7 @@ impl<F: PrimeField64, A: AdviceTable<F>> CircuitBuilder<F, A> {
     }
 
     pub fn alloc(&mut self) -> Var {
-        let var = Var(self.var_index as i64);
+        let var = Var::new(self.var_index as u64);
         self.var_index += 1;
         var
     }
@@ -183,7 +195,7 @@ impl<F: PrimeField64, A: AdviceTable<F>> CircuitBuilder<F, A> {
                 sigma[i] = g.exp_u64(witness_index as u64);
             }
 
-            self.wires.push(var.index());
+            self.wires.push(*var);
         }
 
         let fixed = Fixed {
@@ -228,14 +240,14 @@ impl<F: PrimeField64, A: AdviceTable<F>> CircuitBuilder<F, A> {
         for (row, Fixed { q, .. }) in self.fixed.iter().enumerate() {
             let xai = self.wires[row * 3];
             let xbi = self.wires[row * 3 + 1];
-            let xa = if xai >= 0 {
-                self.advice.get(xai as usize)
+            let xa = if xai.is_defined() {
+                self.advice.get(xai.index() as usize)
             } else {
                 F::zero()
             };
 
-            let xb = if xbi >= 0 {
-                self.advice.get(xbi as usize)
+            let xb = if xbi.is_defined() {
+                self.advice.get(xbi.index() as usize)
             } else {
                 F::zero()
             };
