@@ -9,17 +9,15 @@ use p3_matrix::dense::RowMajorMatrix;
 use crate::standard_plonk::{repr_as, Advice, Fixed, LookupTable, Q, X};
 
 #[derive(Debug, Clone, Copy)]
-pub enum Var {
-    Input(i64),
-    Aux(i64),
-}
+pub struct Var(i64);
 
 impl Var {
-    pub fn index(self) -> i64 {
-        match self {
-            Var::Input(i) => i,
-            Var::Aux(i) => i,
-        }
+    pub fn undefined() -> Self {
+        Var(-1)
+    }
+
+    pub fn index(&self) -> i64 {
+        self.0
     }
 }
 
@@ -110,16 +108,14 @@ impl<F: PrimeField64, A: AdviceTable<F>> CircuitBuilder<F, A> {
     }
 
     pub fn alloc(&mut self) -> Var {
-        let var = Var::Aux(self.var_index as i64);
+        let var = Var(self.var_index as i64);
         self.var_index += 1;
         var
     }
 
     pub fn alloc_input(&mut self) -> Var {
-        let index = self.var_index;
-        let var = Var::Input(index as i64);
-        self.var_index += 1;
-        self.inputs.push(index);
+        let var = self.alloc();
+        self.inputs.push(var.0 as usize);
         var
     }
 
@@ -137,7 +133,7 @@ impl<F: PrimeField64, A: AdviceTable<F>> CircuitBuilder<F, A> {
         let c = self.alloc();
         self.enforce(
             &[F::one(), F::zero(), -F::one(), F::zero(), b],
-            &[a, Var::Aux(-1), c],
+            &[a, Var::undefined(), c],
         );
         c
     }
@@ -282,7 +278,7 @@ impl<F: PrimeField64, A: AdviceTable<F>> CircuitBuilder<F, A> {
 
 #[cfg(test)]
 mod tests {
-    use rand::{random, thread_rng};
+    use rand::{thread_rng};
     use p3_baby_bear::BabyBear;
     use p3_challenger::DuplexChallenger;
     use p3_commit::ExtensionMmcs;
@@ -292,12 +288,11 @@ mod tests {
     use p3_fri::{FriBasedPcs, FriConfigImpl, FriLdt};
     use p3_goldilocks::Goldilocks;
     use p3_keccak::Keccak256Hash;
-    use p3_ldt::{LdtBasedPcs, QuotientMmcs};
+    use p3_ldt::{QuotientMmcs};
     use p3_mds::coset_mds::CosetMds;
     use p3_merkle_tree::FieldMerkleTreeMmcs;
     use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher64};
-    use p3_uni_stark::{StarkConfigImpl, verify};
-    use p3_poseidon2::{DiffusionMatrixBabybear, DiffusionMatrixGoldilocks, Poseidon2};
+    use p3_poseidon2::{DiffusionMatrixGoldilocks, Poseidon2};
     use crate::{ConfigImpl, prove};
     use crate::standard_plonk::Plonk;
     use super::*;
@@ -324,7 +319,9 @@ mod tests {
         ];
 
         // Build only fixed
-        let (fixed, advice) = build_circuit::<F, ()>(&[]);
+        let (fixed, _) = build_circuit::<F, ()>(&[]);
+
+        assert_eq!(fixed.rows().count(), 4);
 
         // Build both fixed and advice
         let (fixed, advice) = build_circuit::<F, Vec<F>>(inputs.as_slice());
@@ -380,7 +377,6 @@ mod tests {
             F::from_canonical_u32(2),
         ];
 
-        // Build both fixed and advice
         let (fixed, advice) = build_circuit::<F, Vec<F>>(inputs.as_slice());
 
         prove::<MyConfig, Plonk<(F, Challenge)>>(&config, &mut challenger, fixed, advice, RowMajorMatrix::new(inputs, 2));
