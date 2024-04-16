@@ -16,7 +16,7 @@ impl Var {
     pub fn new(i: u64) -> Self {
         Var(i + 1)
     }
-    
+
     #[inline]
     pub fn undefined() -> Self {
         Var(0)
@@ -26,15 +26,27 @@ impl Var {
     pub fn is_defined(&self) -> bool {
         self.0 != 0
     }
-    
+
     #[inline]
     pub fn index(&self) -> u64 {
         self.0.saturating_sub(1)
     }
 }
 
-// TODO: A more general trait for advice and input
-pub trait AdviceTable<F: PrimeField>: Default {
+
+pub trait AdviceTable<F: PrimeField> {
+    type Storage: AdviceTableStorage<F>;
+}
+
+impl<F: PrimeField> AdviceTable<F> for () {
+    type Storage = ();
+}
+
+impl<F: PrimeField> AdviceTable<F> for RowMajorMatrix<F> {
+    type Storage = Vec<F>;
+}
+
+pub trait AdviceTableStorage<F: PrimeField>: Default {
     type Out;
 
     const STRIDE: usize = 4;
@@ -51,7 +63,7 @@ pub trait AdviceTable<F: PrimeField>: Default {
     fn to_out(self) -> Self::Out;
 }
 
-impl<F: PrimeField64> AdviceTable<F> for Vec<F> {
+impl<F: PrimeField> AdviceTableStorage<F> for Vec<F> {
     type Out = RowMajorMatrix<F>;
 
     fn push(&mut self, advice: Advice<F>) {
@@ -78,7 +90,7 @@ impl<F: PrimeField64> AdviceTable<F> for Vec<F> {
     }
 }
 
-impl<F: PrimeField> AdviceTable<F> for () {
+impl<F: PrimeField> AdviceTableStorage<F> for () {
     type Out = ();
 
     fn push(&mut self, _advice: Advice<F>) {}
@@ -98,7 +110,7 @@ pub struct CircuitBuilder<F: PrimeField64, A: AdviceTable<F>> {
     // TODO: Is there a better way to handle intermediate state?
     var_index: usize,
     fixed: Vec<Fixed<F>>,
-    advice: A,
+    advice: A::Storage,
 
     /// Mapping input index to witness index
     inputs: Vec<usize>,
@@ -113,7 +125,7 @@ impl<F: PrimeField64, A: AdviceTable<F>> CircuitBuilder<F, A> {
         CircuitBuilder {
             var_index: 0,
             fixed: Vec::new(),
-            advice: A::default(),
+            advice: A::Storage::default(),
             inputs: Vec::new(),
             wires: Vec::new(),
         }
@@ -232,7 +244,7 @@ impl<F: PrimeField64, A: AdviceTable<F>> CircuitBuilder<F, A> {
         self.advice.push(advice);
     }
 
-    pub fn build(mut self, inputs: &[F]) -> (RowMajorMatrix<F>, A::Out) {
+    pub fn build(mut self, inputs: &[F]) -> (RowMajorMatrix<F>, <<A as AdviceTable<F>>::Storage as AdviceTableStorage<F>>::Out) {
         for (val, input_i) in inputs.iter().zip(self.inputs.iter()) {
             self.advice.set(*input_i, *val);
         }
@@ -309,8 +321,8 @@ mod tests {
     use crate::standard_plonk::Plonk;
     use super::*;
 
-    fn build_circuit<F: PrimeField64, T: AdviceTable<F>>(inputs: &[F]) -> (RowMajorMatrix<F>, T::Out) {
-        let mut builder = CircuitBuilder::<F, T>::new();
+    fn build_circuit<F: PrimeField64, A: AdviceTable<F>>(inputs: &[F]) -> (RowMajorMatrix<F>, <<A as AdviceTable<F>>::Storage as AdviceTableStorage<F>>::Out) {
+        let mut builder = CircuitBuilder::<F, A>::new();
         let a = builder.alloc_input();
         let b = builder.alloc_input();
         let c = builder.add(a, b);
@@ -336,7 +348,7 @@ mod tests {
         assert_eq!(fixed.rows().count(), 4);
 
         // Build both fixed and advice
-        let (fixed, advice) = build_circuit::<F, Vec<F>>(inputs.as_slice());
+        let (fixed, advice) = build_circuit::<F, RowMajorMatrix<F>>(inputs.as_slice());
 
         assert_eq!(fixed.rows().count(), 4);
         assert_eq!(advice.rows().count(), 4);
@@ -389,7 +401,7 @@ mod tests {
             F::from_canonical_u32(2),
         ];
 
-        let (fixed, advice) = build_circuit::<F, Vec<F>>(inputs.as_slice());
+        let (fixed, advice) = build_circuit::<F, RowMajorMatrix<F>>(inputs.as_slice());
 
         prove::<MyConfig, Plonk<(F, Challenge)>>(&config, &mut challenger, fixed, advice, RowMajorMatrix::new(inputs, 2));
     }
