@@ -140,7 +140,7 @@ impl <F, EF> Engine for Plonk<(F, EF)> where
     type EF = EF;
     const LOG_QUOTIENT_DEGREE:usize=1;
     const MAX_MULTISET_ELEMENT_WIDTH:usize=4;
-    const MULTISET_WIDTH:usize=7;
+    const MULTISET_WIDTH:usize=8;
     const ID_WIDTH:usize=3;
     const NUM_GATES:usize=9;
 
@@ -218,7 +218,7 @@ impl <F, EF> Engine for Plonk<(F, EF)> where
                                   target:&mut [ExtF])
         where BaseF: AbstractField<F=Self::F> + Copy,
               ExtF: AbstractExtensionField<BaseF, F=Self::EF> + Copy
-    {
+    {        
         let multiset_a = repr_as_mut::<_,Multiset<ExtF>>(target);
         let id = repr_as::<_, X<BaseF>>(id.row_slice(0));
 

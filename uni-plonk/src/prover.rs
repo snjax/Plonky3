@@ -193,9 +193,10 @@ pub fn prove<C, E>(
 
         let zerofier_on_coset = ZerofierOnCoset::new(log_degree, log_quotient_degree, coset_shift);
 
-
-        let coset = cyclic_subgroup_coset_known_order(g_extended, coset_shift, log_quotient_size).collect_vec();
         let quotient_size = 1 << log_quotient_size;
+        let coset = cyclic_subgroup_coset_known_order(g_extended, coset_shift, quotient_size).collect_vec();
+        
+        
 
         let next_step = 1 << log_quotient_degree;
 
@@ -254,7 +255,7 @@ pub fn prove<C, E>(
                 let id = E::id_matrix_at(x_local, x_next);
 
 
-                let mut multiset_a = RowMajorMatrix::new(vec![C::PackedChallenge::zero(); 2*E::MULTISET_WIDTH], E::MULTISET_WIDTH);
+                let mut multiset_a = RowMajorMatrix::new(vec![C::PackedChallenge::zero(); E::MULTISET_WIDTH], E::MULTISET_WIDTH);
 
                 E::eval_multiset(&gamma_packed, &id, &fixed, &advice, &mut multiset_a.values);
 
