@@ -317,7 +317,7 @@ mod tests {
     use p3_merkle_tree::FieldMerkleTreeMmcs;
     use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher64};
     use p3_poseidon2::{DiffusionMatrixGoldilocks, Poseidon2};
-    use crate::{ConfigImpl, prove};
+    use crate::{ConfigImpl, prove, verify};
     use crate::standard_plonk::Plonk;
     use super::*;
 
@@ -401,8 +401,11 @@ mod tests {
             F::from_canonical_u32(2),
         ];
 
+        let instance = RowMajorMatrix::new(inputs.clone(), 2);
+
         let (fixed, advice) = build_circuit::<F, RowMajorMatrix<F>>(inputs.as_slice());
 
-        prove::<MyConfig, Plonk<(F, Challenge)>>(&config, &mut challenger, fixed, advice, RowMajorMatrix::new(inputs, 2));
+        let proof = prove::<MyConfig, Plonk<(F, Challenge)>>(&config, &mut challenger, fixed, advice, RowMajorMatrix::new(inputs, 2));
+        verify::<MyConfig, Plonk<(F, Challenge)>>(&config, &mut challenger, &proof, instance).unwrap();
     }
 }
