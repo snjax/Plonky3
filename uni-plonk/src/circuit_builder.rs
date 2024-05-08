@@ -89,6 +89,8 @@ pub trait AdviceTableStorage<F: PrimeField>: Default {
     fn set(&mut self, index: usize, value: F);
 
     fn to_out(self) -> Self::Out;
+
+    fn num_rows(&self) -> usize;
 }
 
 impl<F: PrimeField> AdviceTableStorage<F> for Vec<F> {
@@ -116,6 +118,10 @@ impl<F: PrimeField> AdviceTableStorage<F> for Vec<F> {
     fn to_out(self) -> RowMajorMatrix<F> {
         RowMajorMatrix::new(self, 4)
     }
+
+    fn num_rows(&self) -> usize {
+        self.len() / Self::STRIDE
+    }
 }
 
 impl<F: PrimeField> AdviceTableStorage<F> for () {
@@ -132,6 +138,10 @@ impl<F: PrimeField> AdviceTableStorage<F> for () {
     fn set(&mut self, _index: usize, _value: F) {}
 
     fn to_out(self) {}
+
+    fn num_rows(&self) -> usize {
+        0
+    }
 }
 
 pub struct CircuitBuilder<F: PrimeField64, A: AdviceTable<F>> {
@@ -431,15 +441,15 @@ impl<F: PrimeField64, A: AdviceTable<F>> CircuitBuilder<F, A> {
 
     pub fn build(mut self, inputs: &[F]) -> (RowMajorMatrix<F>, <<A as AdviceTable<F>>::Storage as AdviceTableStorage<F>>::Out) {
         // TODO: Make xor table optional
-        // self.build_xor_table(8);
+        self.build_xor_table(8);
 
         for (val, input_i) in inputs.iter().zip(self.inputs.iter()) {
             self.advice.set(*input_i, *val);
         }
 
-        for (row, Fixed { q, selector, op, .. }) in self.fixed.iter().enumerate() {
-            let xai = self.wires.get(row * 3).copied().unwrap_or_default();
-            let xbi = self.wires.get(row * 3 + 1).copied().unwrap_or_default();
+        for (row, Fixed { q, selector, op, .. }) in self.fixed[..self.gate_index].iter().enumerate() {
+            let xai = self.wires[row * 3];
+            let xbi = self.wires[row * 3 + 1];
 
             let xa = if xai.is_defined() {
                 self.advice.get(xai.index() as usize)
@@ -482,12 +492,16 @@ impl<F: PrimeField64, A: AdviceTable<F>> CircuitBuilder<F, A> {
 
 
         // Pad the rows to the next power of two
-        let num_rows = self.fixed.len();
-        for _ in 0..num_rows.next_power_of_two() - num_rows {
+        let num_fixed_rows = self.fixed.len();
+        let next_power_of_two = num_fixed_rows.next_power_of_two();
+        for _ in 0..next_power_of_two - num_fixed_rows {
             self.fixed.push(Fixed::default());
-            self.advice.push(Advice::default());
         }
 
+        let num_advice_rows = self.advice.num_rows();
+        for _ in 0..next_power_of_two - num_advice_rows {
+            self.advice.push(Default::default());
+        }
 
         // TODO: Cast Vec<Fixed> to Vec<F> instead of allocating a new Vec.
         let mut fixed_rows = Vec::new();
@@ -547,13 +561,16 @@ mod tests {
         // Build only fixed
         let (fixed, _) = build_circuit::<F, ()>(&[]);
 
-        assert_eq!(fixed.rows().count(), 4);
+        assert!(fixed.rows().count().is_power_of_two());
 
         // Build both fixed and advice
         let (fixed, advice) = build_circuit::<F, RowMajorMatrix<F>>(inputs.as_slice());
 
-        assert!(fixed.rows().count().is_power_of_two());
-        assert!(advice.rows().count().is_power_of_two());
+        let num_fixed_rows = fixed.rows().count();
+        assert!(num_fixed_rows.is_power_of_two());
+
+        let num_advice_rows = advice.rows().count();
+        assert_eq!(num_fixed_rows, num_advice_rows);
     }
 
     #[test]
