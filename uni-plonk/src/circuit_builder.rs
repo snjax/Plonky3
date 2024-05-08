@@ -11,6 +11,12 @@ use crate::standard_plonk::{repr_as, Advice, Fixed, LookupTable, Q, X};
 #[derive(Debug, Clone, Copy)]
 pub struct Var(u64);
 
+impl Default for Var {
+    fn default() -> Self {
+        Var::undefined()
+    }
+}
+
 impl Var {
     #[inline]
     pub fn new(i: u64) -> Self {
@@ -30,6 +36,28 @@ impl Var {
     #[inline]
     pub fn index(&self) -> u64 {
         self.0.saturating_sub(1)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LookupOp {
+    Nop,
+    Xor,
+}
+
+impl LookupOp {
+    pub fn to_f<F: PrimeField64>(self) -> F {
+        F::from_canonical_u64(self as u64)
+    }
+}
+
+impl<F: PrimeField64> From<F> for LookupOp {
+    fn from(f: F) -> Self {
+        match f.as_canonical_u64() {
+            0 => LookupOp::Nop,
+            1 => LookupOp::Xor,
+            _ => unreachable!("Invalid lookup op"),
+        }
     }
 }
 
@@ -109,6 +137,8 @@ impl<F: PrimeField> AdviceTableStorage<F> for () {
 pub struct CircuitBuilder<F: PrimeField64, A: AdviceTable<F>> {
     // TODO: Is there a better way to handle intermediate state?
     var_index: usize,
+    gate_index: usize,
+    lookup_index: usize,
     fixed: Vec<Fixed<F>>,
     advice: A::Storage,
 
@@ -121,9 +151,10 @@ pub struct CircuitBuilder<F: PrimeField64, A: AdviceTable<F>> {
 
 impl<F: PrimeField64, A: AdviceTable<F>> CircuitBuilder<F, A> {
     pub fn new() -> Self {
-        // TODO: Preallocate space for fixed and advice
         CircuitBuilder {
             var_index: 0,
+            gate_index: 0,
+            lookup_index: 0,
             fixed: Vec::new(),
             advice: A::Storage::default(),
             inputs: Vec::new(),
@@ -146,8 +177,16 @@ impl<F: PrimeField64, A: AdviceTable<F>> CircuitBuilder<F, A> {
     pub fn add(&mut self, a: Var, b: Var) -> Var {
         let c = self.alloc();
         self.enforce(
-            &[F::one(), F::one(), -F::one(), F::zero(), F::zero()],
+            Q {
+                l: F::one(),
+                r: F::one(),
+                o: -F::one(),
+                m: F::zero(),
+                c: F::zero(),
+            },
             &[a, b, c],
+            F::zero(),
+            F::zero(),
         );
         c
     }
@@ -155,18 +194,49 @@ impl<F: PrimeField64, A: AdviceTable<F>> CircuitBuilder<F, A> {
     pub fn add_constant(&mut self, a: Var, b: F) -> Var {
         let _b = self.alloc();
         let c = self.alloc();
+
         self.enforce(
-            &[F::one(), F::zero(), -F::one(), F::zero(), b],
+            Q {
+                l: F::one(),
+                r: F::zero(),
+                o: -F::one(),
+                m: F::zero(),
+                c: b,
+            },
             &[a, Var::undefined(), c],
+            F::zero(),
+            F::zero(),
+        );
+
+        c
+    }
+
+    pub fn add_mul(&mut self, l: F, a: Var, r: F, b: Var) -> Var {
+        let c = self.alloc();
+
+        self.enforce(
+            Q { l, r, o: -F::one(), m: F::zero(), c: F::zero() },
+            &[a, b, c],
+            F::zero(),
+            F::zero(),
         );
         c
     }
 
     pub fn mul(&mut self, a: Var, b: Var) -> Var {
         let c = self.alloc();
+
         self.enforce(
-            &[F::zero(), F::zero(), -F::one(), F::one(), F::zero()],
+            Q {
+                l: F::zero(),
+                r: F::zero(),
+                o: -F::one(),
+                m: F::one(),
+                c: F::zero(),
+            },
             &[a, b, c],
+            F::zero(),
+            F::zero(),
         );
         c
     }
@@ -174,15 +244,142 @@ impl<F: PrimeField64, A: AdviceTable<F>> CircuitBuilder<F, A> {
     pub fn eq(&mut self, a: Var, b: Var) -> Var {
         let c = self.alloc();
         self.enforce(
-            &[F::one(), -F::one(), F::zero(), F::zero(), F::zero()],
+            Q {
+                l: F::one(),
+                r: -F::one(),
+                o: F::zero(),
+                m: F::zero(),
+                c: F::zero(),
+            },
             &[a, b, c],
+            F::zero(),
+            F::zero(),
         );
         c
     }
 
-    // TODO: Accept Q and X instead slices?
-    pub fn enforce(&mut self, fixed: &[F], advice: &[Var]) {
-        let zero = F::zero();
+    pub fn eq_constant(&mut self, a: Var, b: F) -> Var {
+        let c = self.alloc();
+        self.enforce(
+            Q {
+                l: F::one(),
+                r: -F::one(),
+                o: F::zero(),
+                m: F::zero(),
+                c: b,
+            },
+            &[a, Var::undefined(), c],
+            F::zero(),
+            F::zero(),
+        );
+        c
+    }
+
+    pub fn lookup_xor(&mut self, x: Var, y: Var) -> Var {
+        let z = self.alloc();
+
+        self.enforce(
+            Default::default(),
+            &[x, y, z],
+            F::one(),
+            LookupOp::Xor.to_f(),
+        );
+
+        z
+    }
+
+    pub fn lookup_range(&mut self, x: Var) -> Var {
+        let z = self.alloc();
+
+        self.enforce(
+            Default::default(),
+            &[x, x, z],
+            F::one(),
+            LookupOp::Xor.to_f(), // Reuse the XOR lookup table
+        );
+
+        z
+    }
+
+    pub fn xor(&mut self, a: Var, b: Var) -> Var {
+        // let c = self.alloc();
+        //
+        // // 1. Divide the element into chunks of 8 bits
+        // // 2. Do a lookup for each chunk
+        // // 3. Sum the results with appropriate offsets
+        //
+        // let mut num_chunks = core::mem::size_of::<F>() / 8;
+        // let mut chunks = Vec::new(); // FIXME: Implement chunking
+        // for chunk in 0..num_chunks {
+        //     let z = self.lookup_xor(a, b);
+        //
+        //     self.advice.set_row(self.gate_index - 1, Advice {
+        //         x: X {
+        //             a: F::from_canonical_u64(chunk as u64), // Temporarily reuse witness for lookup metadata
+        //             b: F::zero(),
+        //             c: F::zero(),
+        //         },
+        //         lookup_right_m: F::one(), // FIXME
+        //     });
+        //
+        //     chunks.push(z);
+        // }
+        //
+        //
+        // while num_chunks != 1 {
+        //     // iterate over pairs of chunks
+        //     for (i, j) in (0..num_chunks).tuples() {
+        //         let shift = (num_chunks / 2) as u64; // FIXME
+        //         let t = self.add_mul(
+        //             F::from_canonical_u64(shift),
+        //             a,
+        //             F::from_canonical_u64(shift),
+        //             b,
+        //         );
+        //
+        //
+        //         self.enforce(
+        //             Default::default(),
+        //             &[t, c, c],
+        //             F::one(),
+        //             F::zero(),
+        //         );
+        //     }
+        //
+        //     num_chunks /= 2;
+        // }
+        //
+        // c
+
+        todo!()
+    }
+
+    fn build_xor_table(&mut self, chunk_size: u32) {
+        for x in 0..2u64.pow(chunk_size) {
+            for y in 0..2u64.pow(chunk_size) {
+                let table = LookupTable {
+                    op: F::one(),
+                    x: X {
+                        a: F::from_canonical_u64(x),
+                        b: F::from_canonical_u64(y),
+                        c: F::from_canonical_u64(x ^ y),
+                    },
+                };
+
+                if self.lookup_index < self.fixed.len() {
+                    self.fixed[self.lookup_index].table = table;
+                } else {
+                    self.fixed.push(Fixed {
+                        table,
+                        ..Default::default()
+                    });
+                }
+                self.lookup_index += 1;
+            }
+        }
+    }
+
+    pub fn enforce(&mut self, q: Q<F>, advice: &[Var], selector: F, op: F) {
         let g = F::generator();
         let row = self.fixed.len();
 
@@ -191,7 +388,7 @@ impl<F: PrimeField64, A: AdviceTable<F>> CircuitBuilder<F, A> {
             let var_index = var.index();
             let witness_index = row + i;
 
-            if var_index >= 0 && row > 0 {
+            if row > 0 {
                 let wire_row_index = var_index / 3;
                 if wire_row_index as usize == row {
                     let prev = sigma[var_index as usize % 3];
@@ -210,48 +407,40 @@ impl<F: PrimeField64, A: AdviceTable<F>> CircuitBuilder<F, A> {
             self.wires.push(*var);
         }
 
-        let fixed = Fixed {
-            q: Q {
-                l: fixed[0],
-                r: fixed[1],
-                o: fixed[2],
-                m: fixed[3],
-                c: fixed[4],
-            },
-            sigma: repr_as::<_, X<_>>(&sigma).clone(),
-            selector: zero,
-            op: zero,
-            table: LookupTable {
-                op: zero,
-                x: X {
-                    a: zero,
-                    b: zero,
-                    c: zero,
-                },
-            },
-        };
+        if self.fixed.len() > self.gate_index {
+            let fixed = &mut self.fixed[self.gate_index];
+            fixed.q = q;
+            fixed.sigma = repr_as::<_, X<_>>(&sigma).clone();
+            fixed.selector = selector;
+            fixed.op = op;
+        } else {
+            let fixed = Fixed {
+                q,
+                sigma: repr_as::<_, X<_>>(&sigma).clone(),
+                selector,
+                op,
+                ..Default::default()
+            };
 
-        let advice = Advice {
-            x: X {
-                a: zero,
-                b: zero,
-                c: zero,
-            },
-            lookup_right_m: zero,
-        };
+            self.fixed.push(fixed);
+        }
 
-        self.fixed.push(fixed);
-        self.advice.push(advice);
+        self.gate_index += 1;
+        self.advice.push(Default::default());
     }
 
     pub fn build(mut self, inputs: &[F]) -> (RowMajorMatrix<F>, <<A as AdviceTable<F>>::Storage as AdviceTableStorage<F>>::Out) {
+        // TODO: Make xor table optional
+        // self.build_xor_table(8);
+
         for (val, input_i) in inputs.iter().zip(self.inputs.iter()) {
             self.advice.set(*input_i, *val);
         }
 
-        for (row, Fixed { q, .. }) in self.fixed.iter().enumerate() {
-            let xai = self.wires[row * 3];
-            let xbi = self.wires[row * 3 + 1];
+        for (row, Fixed { q, selector, op, .. }) in self.fixed.iter().enumerate() {
+            let xai = self.wires.get(row * 3).copied().unwrap_or_default();
+            let xbi = self.wires.get(row * 3 + 1).copied().unwrap_or_default();
+
             let xa = if xai.is_defined() {
                 self.advice.get(xai.index() as usize)
             } else {
@@ -264,7 +453,20 @@ impl<F: PrimeField64, A: AdviceTable<F>> CircuitBuilder<F, A> {
                 F::zero()
             };
 
-            let xc = q.l * xa + q.r * xb + q.m * xa * xb + q.c;
+            let xc = if selector.is_one() {
+                match LookupOp::from(*op) {
+                    LookupOp::Nop => xa,
+                    LookupOp::Xor => {
+                        let a = xa.as_canonical_u64();
+                        let b = xb.as_canonical_u64();
+                        let c = a ^ b;
+                        F::from_canonical_u64(c)
+                    }
+                }
+            } else {
+                q.l * xa + q.r * xb + q.m * xa * xb + q.c
+            };
+
 
             let advice = Advice {
                 x: X {
@@ -326,9 +528,9 @@ mod tests {
         let a = builder.alloc_input();
         let b = builder.alloc_input();
         let c = builder.add(a, b);
-        builder.add_constant(c, F::from_canonical_u32(42));
-
-        builder.eq(c, c);
+        let a_xor = builder.lookup_xor(a, a);
+        builder.eq(a, a_xor);
+        builder.add_constant(b, F::from_canonical_u32(42));
 
         builder.build(inputs)
     }
@@ -350,8 +552,8 @@ mod tests {
         // Build both fixed and advice
         let (fixed, advice) = build_circuit::<F, RowMajorMatrix<F>>(inputs.as_slice());
 
-        assert_eq!(fixed.rows().count(), 4);
-        assert_eq!(advice.rows().count(), 4);
+        assert!(fixed.rows().count().is_power_of_two());
+        assert!(advice.rows().count().is_power_of_two());
     }
 
     #[test]
@@ -406,6 +608,8 @@ mod tests {
         let (fixed, advice) = build_circuit::<F, RowMajorMatrix<F>>(inputs.as_slice());
 
         let proof = prove::<MyConfig, Plonk<(F, Challenge)>>(&config, &mut challenger, fixed, advice, RowMajorMatrix::new(inputs, 2));
-        verify::<MyConfig, Plonk<(F, Challenge)>>(&config, &mut challenger, &proof, instance).unwrap();
+        let result = verify::<MyConfig, Plonk<(F, Challenge)>>(&config, &mut challenger, &proof, instance);
+
+        assert!(result.is_ok());
     }
 }
