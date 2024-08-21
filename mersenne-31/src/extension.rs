@@ -121,6 +121,62 @@ impl HasTwoAdicComplexBinomialExtension<3> for Mersenne31 {
     }
 }
 
+
+impl HasComplexBinomialExtension<4> for Mersenne31 {
+    // Verifiable in Sage with
+    // ```sage
+    // p = 2**31 - 1  # Mersenne31
+    // F = GF(p)  # The base field GF(p)
+    // R.<x> = F[]  # The polynomial ring over F
+    // K.<i> = F.extension(x^2 + 1)  # The complex extension field
+    // R2.<y> = K[]
+    // f2 = y^4 - i - 2
+    // assert f2.is_irreducible()
+    // ```
+    fn w() -> Complex<Self> {
+        Complex::new(Mersenne31::new(2), Mersenne31::one())
+    }
+
+    // Verifiable in Sage with
+    // ```sage
+    // K2.<j> = K.extension(f2)
+    //  g = j + 4
+    // for f in factor(p^8 - 1):
+    //   assert g^((p^8-1) // f) != 1
+    // ```
+    fn ext_generator() -> [Complex<Self>; 4] {
+        [Complex::new_real(Mersenne31::new(4)), Complex::one(), Complex::zero(), Complex::zero()]
+    }
+
+    // DTH_ROOT = W^((p^2 - 1)/4).
+    fn dth_root() -> Complex<Self> {
+        Complex::new_imag(Mersenne31::one())
+    }
+}
+
+impl HasTwoAdicComplexBinomialExtension<4> for Mersenne31 {
+    const COMPLEX_EXT_TWO_ADICITY: usize = 34;
+
+    fn complex_ext_two_adic_generator(bits: usize) -> [Complex<Self>; 4] {
+        assert!(bits <= 34);
+        if bits == 34 {[
+            Complex::zero(), 
+            Complex::new(Mersenne31::new(491753981), Mersenne31::new(626196722)), 
+            Complex::zero(),
+            Complex::zero(),
+        ]}
+        else if bits == 33 {[
+            Complex::zero(),
+            Complex::zero(),
+            Complex::new(Mersenne31::new(709737603), Mersenne31::new(1201014362)),
+            Complex::zero(),
+        ]}
+        else {
+            [Complex::two_adic_generator(bits), Complex::zero(), Complex::zero(), Complex::zero()]
+        }
+    }
+}
+
 #[cfg(test)]
 mod test_cubic_extension {
     use p3_field::extension::{BinomialExtensionField, Complex};
@@ -146,6 +202,22 @@ mod test_quadratic_extension {
 
     type F = Complex<Mersenne31>;
     type EF = BinomialExtensionField<F, 2>;
+
+    test_field!(super::EF);
+
+    test_two_adic_extension_field!(super::F, super::EF);
+}
+
+#[cfg(test)]
+mod test_octic_extension {
+
+    use p3_field::extension::{BinomialExtensionField, Complex};
+    use p3_field_testing::{test_field, test_two_adic_extension_field};
+
+    use crate::Mersenne31;
+
+    type F = Complex<Mersenne31>;
+    type EF = BinomialExtensionField<F, 4>;
 
     test_field!(super::EF);
 
