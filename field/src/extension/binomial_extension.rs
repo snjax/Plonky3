@@ -27,6 +27,12 @@ pub struct BinomialExtensionField<AF, const D: usize> {
     pub(crate) value: [AF; D],
 }
 
+impl <AF, const D: usize> BinomialExtensionField<AF, D> {
+    pub const fn from_raw(value: [AF; D]) -> Self {
+        Self { value }
+    }
+}
+
 impl<AF: AbstractField, const D: usize> Default for BinomialExtensionField<AF, D> {
     fn default() -> Self {
         Self {
