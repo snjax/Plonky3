@@ -17,3 +17,4 @@ pub use cfft::*;
 pub use domain::*;
 pub use ordering::*;
 pub use pcs::*;
+pub use point::*;
