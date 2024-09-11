@@ -1,4 +1,3 @@
-use std::fmt::Debug;
 use std::marker::PhantomData;
 
 use p3_challenger::{DuplexChallenger, FieldChallenger};
@@ -83,10 +82,14 @@ fn main() {
 
     let evals = RowMajorMatrix::<Val>::rand(&mut rng, 1 << log_n, w, );
 
-    let (_comm, prover_data) =
-        <Pcs as p3_commit::Pcs<Challenge, Challenger>>::commit(&pcs, vec![(d, evals.clone())]);
+    let (_comm, prover_data) = tracing::info_span!("commit").in_scope(|| {
+        <Pcs as p3_commit::Pcs<Challenge, Challenger>>::commit(&pcs, vec![(d, evals.clone())])
+    });
 
     let mut challenger = Challenger::new(perm.clone());
     let zeta: Challenge = challenger.sample_ext_element();
-    pcs.open(vec![(&prover_data, vec![vec![zeta]])], &mut challenger);
+
+    tracing::info_span!("open").in_scope(|| {
+        pcs.open(vec![(&prover_data, vec![vec![zeta]])], &mut challenger);
+    });
 }
