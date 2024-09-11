@@ -59,6 +59,8 @@ fn commit_benchmark(c: &mut Criterion) {
         mmcs: challenge_mmcs,
     };
 
+    dbg!(fri_config.conjectured_soundness_bits());
+
     type Pcs = CirclePcs<Val, ValMmcs, ChallengeMmcs>;
     let pcs = Pcs {
         mmcs: val_mmcs,
