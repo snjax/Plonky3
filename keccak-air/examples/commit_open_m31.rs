@@ -17,19 +17,21 @@ use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_poseidon2::{Poseidon2, Poseidon2ExternalMatrixGeneral};
 
+type Val = Mersenne31;
+
 fn main() {
     let mut rng = rand::thread_rng();
 
-    let env_filter = EnvFilter::builder()
-        .with_default_directive(LevelFilter::INFO.into())
-        .from_env_lossy();
+    // let env_filter = EnvFilter::builder()
+    //     .with_default_directive(LevelFilter::INFO.into())
+    //     .from_env_lossy();
+    //
+    // Registry::default()
+    //     .with(env_filter)
+    //     .with(ForestLayer::default())
+    //     .init();
 
-    Registry::default()
-        .with(env_filter)
-        .with(ForestLayer::default())
-        .init();
 
-    type Val = Mersenne31;
     type Challenge = BinomialExtensionField<Mersenne31, 3>;
 
     type Perm = Poseidon2<Val, Poseidon2ExternalMatrixGeneral, DiffusionMatrixMersenne31, 16, 5>;
@@ -58,38 +60,48 @@ fn main() {
 
     type Challenger = DuplexChallenger<Val, Perm, 16, 8>;
 
-    let fri_config = FriConfig {
-        log_blowup: 1,
-        num_queries: 80,
-        proof_of_work_bits: 16,
-        mmcs: challenge_mmcs,
-    };
 
-    type Pcs = CirclePcs<Val, ValMmcs, ChallengeMmcs>;
-    let pcs = Pcs {
-        mmcs: val_mmcs,
-        fri_config,
-        _phantom: PhantomData,
-    };
+    for log_n in (10..=20).step_by(2) {
+        for w in (1..=64).step_by(2) {
+            println!("log_n: {}, w: {}", log_n, w);
 
-    let log_n = 14;
-    let w = 64;
+            let fri_config = FriConfig {
+                log_blowup: 1,
+                num_queries: 80,
+                proof_of_work_bits: 16,
+                mmcs: challenge_mmcs.clone(),
+            };
 
-    let d = <Pcs as p3_commit::Pcs<Challenge, Challenger>>::natural_domain_for_degree(
-        &pcs,
-        1 << log_n,
-    );
+            type Pcs = CirclePcs<Val, ValMmcs, ChallengeMmcs>;
+            let pcs = Pcs {
+                mmcs: val_mmcs.clone(),
+                fri_config,
+                _phantom: PhantomData,
+            };
 
-    let evals = RowMajorMatrix::<Val>::rand(&mut rng, 1 << log_n, w, );
+            let d = <Pcs as p3_commit::Pcs<Challenge, Challenger>>::natural_domain_for_degree(
+                &pcs,
+                1 << log_n,
+            );
 
-    let (_comm, prover_data) = tracing::info_span!("commit").in_scope(|| {
-        <Pcs as p3_commit::Pcs<Challenge, Challenger>>::commit(&pcs, vec![(d, evals.clone())])
-    });
+            let evals = RowMajorMatrix::<Val>::rand(&mut rng, 1 << log_n, w);
 
-    let mut challenger = Challenger::new(perm.clone());
-    let zeta: Challenge = challenger.sample_ext_element();
+            let (_comm, prover_data) = tracing::info_span!("commit").in_scope(|| {
+                let time = std::time::Instant::now();
+                let res = <Pcs as p3_commit::Pcs<Challenge, Challenger>>::commit(&pcs, vec![(d, evals.clone())]);
+                println!("commit time: {:?}", time.elapsed());
+                res
+            });
 
-    tracing::info_span!("open").in_scope(|| {
-        pcs.open(vec![(&prover_data, vec![vec![zeta]])], &mut challenger);
-    });
+            let mut challenger = Challenger::new(perm.clone());
+            let zeta: Challenge = challenger.sample_ext_element();
+
+            tracing::info_span!("open").in_scope(|| {
+                let time = std::time::Instant::now();
+                pcs.open(vec![(&prover_data, vec![vec![zeta]])], &mut challenger);
+                println!("open time: {:?}", time.elapsed());
+            });
+        }
+    }
+
 }
