@@ -31,17 +31,17 @@ fn main() {
     type Challenge = BinomialExtensionField<Val, 2>;
 
 
-    type Perm = Poseidon2<Val, Poseidon2ExternalMatrixGeneral, DiffusionMatrixGoldilocks, 16, 7>;
+    type Perm = Poseidon2<Val, Poseidon2ExternalMatrixGeneral, DiffusionMatrixGoldilocks, 8, 7>;
     let perm = Perm::new_from_rng_128(
         Poseidon2ExternalMatrixGeneral,
         DiffusionMatrixGoldilocks,
         &mut rng,
     );
 
-    type MyHash = PaddingFreeSponge<Perm, 16, 8, 8>;
+    type MyHash = PaddingFreeSponge<Perm, 8, 4, 4>;
     let hash = MyHash::new(perm.clone());
 
-    type MyCompress = TruncatedPermutation<Perm, 2, 8, 16>;
+    type MyCompress = TruncatedPermutation<Perm, 2, 4, 8>;
     let compress = MyCompress::new(perm.clone());
 
     type ValMmcs = FieldMerkleTreeMmcs<
@@ -49,7 +49,7 @@ fn main() {
         <Val as Field>::Packing,
         MyHash,
         MyCompress,
-        8,
+        4,
     >;
     let val_mmcs = ValMmcs::new(hash, compress);
 
@@ -59,7 +59,7 @@ fn main() {
     type Dft = Radix2DitParallel;
     let dft = Dft {};
 
-    type Challenger = DuplexChallenger<Val, Perm, 16, 8>;
+    type Challenger = DuplexChallenger<Val, Perm, 8, 4>;
 
     let fri_config = FriConfig {
         log_blowup: 1,
