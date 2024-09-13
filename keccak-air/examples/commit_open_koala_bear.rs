@@ -1,3 +1,4 @@
+use std::time::Duration;
 use p3_challenger::{DuplexChallenger, FieldChallenger};
 use p3_commit::{ExtensionMmcs, Pcs};
 use p3_field::extension::BinomialExtensionField;
@@ -9,7 +10,6 @@ use tracing_forest::ForestLayer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Registry};
-use p3_baby_bear::{BabyBear, DiffusionMatrixBabyBear};
 use p3_dft::Radix2DitParallel;
 use p3_field::Field;
 use p3_koala_bear::{DiffusionMatrixKoalaBear, KoalaBear};
@@ -71,24 +71,55 @@ fn main() {
     type Pcs = TwoAdicFriPcs<Val, Dft, ValMmcs, ChallengeMmcs>;
     let pcs = Pcs::new(dft, val_mmcs, fri_config);
 
-    let log_n = 14;
-    let w = 64;
+    let mut id = 0;
+    for log_n in (10..=20).step_by(2) {
+        for w in (1..=64).step_by(2) {
+            let d = <Pcs as p3_commit::Pcs<Challenge, Challenger>>::natural_domain_for_degree(
+                &pcs,
+                1 << log_n,
+            );
 
-    let d = <Pcs as p3_commit::Pcs<Challenge, Challenger>>::natural_domain_for_degree(
-        &pcs,
-        1 << log_n,
-    );
+            let evals = RowMajorMatrix::<Val>::rand(&mut rng, 1 << log_n, w);
 
-    let evals = RowMajorMatrix::<Val>::rand(&mut rng, 1 << log_n, w);
+            const NUM_TRIES: usize = 100;
 
-    let (_comm, prover_data) = tracing::info_span!("commit").in_scope(|| {
-        <Pcs as p3_commit::Pcs<Challenge, Challenger>>::commit(&pcs, vec![(d, evals.clone())])
-    });
+            let (avg_time, (_comm, prover_data)) = run_n_times(NUM_TRIES, || {
+                tracing::info_span!("commit").in_scope(|| {
+                    tracing::info!("id: {}", id);
+                    <Pcs as p3_commit::Pcs<Challenge, Challenger>>::commit(&pcs, vec![(d, evals.clone())])
+                })
+            });
 
-    let mut challenger = Challenger::new(perm.clone());
-    let zeta: Challenge = challenger.sample_ext_element();
+            let avg_time = Duration::from_secs_f64(avg_time);
+            tracing::info!("commit avg time: {:?}", avg_time);
 
-    tracing::info_span!("open").in_scope(|| {
-        pcs.open(vec![(&prover_data, vec![vec![zeta]])], &mut challenger);
-    });
+            let mut challenger = Challenger::new(perm.clone());
+            let zeta: Challenge = challenger.sample_ext_element();
+
+            let (avg_time, _) = run_n_times(NUM_TRIES, || {
+                tracing::info_span!("open").in_scope(|| {
+                    tracing::info!("id: {}", id);
+                    pcs.open(vec![(&prover_data, vec![vec![zeta]])], &mut challenger);
+                });
+            });
+
+
+            let avg_time = Duration::from_secs_f64(avg_time);
+            tracing::info!("open avg time: {:?}", avg_time);
+
+            id += 1;
+        }
+    }
+}
+
+fn run_n_times<T>(n: usize, mut f: impl FnMut() -> T) -> (f64, T) {
+    let mut times = Vec::with_capacity(n);
+    let res = f();
+    for _ in 0..n {
+        let time = std::time::Instant::now();
+        f();
+        times.push(time.elapsed().as_secs_f64());
+    }
+
+    (times.iter().sum::<f64>() / n as f64, res)
 }
