@@ -40,8 +40,8 @@ use crate::point::Point;
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub struct CircleDomain<F> {
     // log_n corresponds to the log size of the WHOLE domain
-    pub(crate) log_n: usize,
-    pub(crate) shift: Point<F>,
+    pub log_n: usize,
+    pub shift: Point<F>,
 }
 
 impl<F: ComplexExtendable> CircleDomain<F> {
@@ -57,21 +57,21 @@ impl<F: ComplexExtendable> CircleDomain<F> {
     fn is_standard(&self) -> bool {
         self.shift == Point::generator(self.log_n + 1)
     }
-    pub(crate) fn gen(&self) -> Point<F> {
+    pub fn gen(&self) -> Point<F> {
         Point::generator(self.log_n - 1)
     }
-    pub(crate) fn coset0(&self) -> impl Iterator<Item = Point<F>> {
+    pub fn coset0(&self) -> impl Iterator<Item = Point<F>> {
         let g = self.gen();
         iterate(self.shift, move |&p| p + g).take(1 << (self.log_n - 1))
     }
-    fn coset1(&self) -> impl Iterator<Item = Point<F>> {
+    pub fn coset1(&self) -> impl Iterator<Item = Point<F>> {
         let g = self.gen();
         iterate(g - self.shift, move |&p| p + g).take(1 << (self.log_n - 1))
     }
-    pub(crate) fn points(&self) -> impl Iterator<Item = Point<F>> {
+    pub fn points(&self) -> impl Iterator<Item = Point<F>> {
         self.coset0().interleave(self.coset1())
     }
-    pub(crate) fn nth_point(&self, idx: usize) -> Point<F> {
+    pub fn nth_point(&self, idx: usize) -> Point<F> {
         let (idx, lsb) = (idx >> 1, idx & 1);
         if lsb == 0 {
             self.shift + self.gen() * idx
@@ -80,15 +80,15 @@ impl<F: ComplexExtendable> CircleDomain<F> {
         }
     }
 
-    pub(crate) fn zeroifier<EF: ExtensionField<F>>(&self, at: Point<EF>) -> EF {
+    pub fn zeroifier<EF: ExtensionField<F>>(&self, at: Point<EF>) -> EF {
         at.v_n(self.log_n) - self.shift.v_n(self.log_n)
     }
 
-    pub(crate) fn s_p<EF: ExtensionField<F>>(&self, p: Point<F>, at: Point<EF>) -> EF {
+    pub fn s_p<EF: ExtensionField<F>>(&self, p: Point<F>, at: Point<EF>) -> EF {
         self.zeroifier(at) / p.v_tilde_p(at)
     }
 
-    pub(crate) fn s_p_normalized<EF: ExtensionField<F>>(&self, p: Point<F>, at: Point<EF>) -> EF {
+    pub fn s_p_normalized<EF: ExtensionField<F>>(&self, p: Point<F>, at: Point<EF>) -> EF {
         self.zeroifier(at) / (p.v_tilde_p(at) * p.s_p_at_p(self.log_n))
     }
 }
