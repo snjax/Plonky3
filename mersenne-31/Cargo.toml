@@ -24,6 +24,12 @@ serde = { version = "1.0", default-features = false, features = ["derive"] }
 [dev-dependencies]
 criterion = "0.5"
 p3-field-testing = { path = "../field-testing" }
+p3-challenger = { path = "../challenger" }
+p3-fri = { path = "../fri" }
+p3-merkle-tree = { path = "../merkle-tree" }
+p3-circle = { path = "../circle" }
+p3-commit = { path = "../commit" }
+p3-maybe-rayon = { path = "../maybe-rayon", features = ["parallel"] }
 rand_chacha = "0.3.1"
 rand_xoshiro = "0.6.0"
 
@@ -33,4 +39,8 @@ harness = false
 
 [[bench]]
 name = "extension"
+harness = false
+
+[[bench]]
+name = "bench_commit"
 harness = false
