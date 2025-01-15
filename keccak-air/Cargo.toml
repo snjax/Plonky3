@@ -32,8 +32,11 @@ p3-sha256 = { path = "../sha256" }
 p3-symmetric = { path = "../symmetric" }
 p3-uni-stark = { path = "../uni-stark" }
 rand = "0.8.5"
-tracing-subscriber = { version = "0.3.17", features = ["std", "env-filter"] }
+tracing-subscriber = { version = "0.3.17", features = ["std", "env-filter", "json", "chrono"] }
 tracing-forest = { version = "0.1.6", features = ["ansi", "smallvec"] }
+p3-maybe-rayon = { path = "../maybe-rayon", features = ["parallel"] }
+serde = { version = "1.0.130", features = ["derive"] }
+serde_json = "1.0.128"
 
 [features]
 # TODO: Consider removing, at least when this gets split off into another repository.
