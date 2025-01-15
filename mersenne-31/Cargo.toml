@@ -26,6 +26,11 @@ criterion.workspace = true
 p3-field-testing.workspace = true
 rand_chacha.workspace = true
 rand_xoshiro.workspace = true
+p3-commit.workspace = true
+p3-merkle-tree.workspace = true
+p3-circle.workspace = true
+p3-fri.workspace = true
+p3-challenger.workspace = true
 
 [[bench]]
 name = "bench_field"
@@ -33,4 +38,8 @@ harness = false
 
 [[bench]]
 name = "extension"
+harness = false
+
+[[bench]]
+name = "bench_commit"
 harness = false

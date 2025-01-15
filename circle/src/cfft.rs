@@ -23,7 +23,7 @@ pub struct CircleEvaluations<F, M = RowMajorMatrix<F>> {
 }
 
 impl<F: Copy + Send + Sync, M: Matrix<F>> CircleEvaluations<F, M> {
-    pub(crate) fn from_cfft_order(domain: CircleDomain<F>, values: M) -> Self {
+    pub fn from_cfft_order(domain: CircleDomain<F>, values: M) -> Self {
         assert_eq!(1 << domain.log_n, values.height());
         Self { domain, values }
     }
